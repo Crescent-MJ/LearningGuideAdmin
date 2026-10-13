@@ -1,0 +1,13 @@
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vs/
+.idea/
+*.swp
+
+# 日志与临时文件
+*.log
+*.tmp
