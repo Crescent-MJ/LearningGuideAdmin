@@ -28,7 +28,7 @@ Learning Guide BackOffice —— 结构化课程知识库管理系统（Knowledg
 3. .env / API key / 令牌永不入库、不入对话、不入文档；API 密钥绝不出现在前端代码
 4. 所有 AI 请求必须经后端代理（`/api/ai/chat-stream`），严禁前端直连 LLM API
 5. 所有 API 响应使用统一格式（success/data/error/message）
-6. 每次开发结束：【AI协作日志】+ 回填受影响文档（含设计文档同步）
+6. 每次开发结束：【AI协作日志】写入 `docs/AI_Collaboration_Log.md`（每完成一个 Phase 或重大决策必须落盘该文档）+ 回填受影响文档（含设计文档同步）
 
 ## Git 工作流
 
