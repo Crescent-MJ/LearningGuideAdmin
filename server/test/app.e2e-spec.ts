@@ -16,11 +16,14 @@ describe('AppController (e2e)', () => {
     await app.init();
   });
 
-  it('/ (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/')
-      .expect(200)
-      .expect('Hello World!');
+  it('/ (GET) 应返回 §5.3 统一响应格式 JSON', async () => {
+    const res = await request(app.getHttpServer()).get('/').expect(200);
+    expect(res.body).toEqual({
+      success: true,
+      data: 'Hello World!',
+      error: null,
+      message: '操作成功',
+    });
   });
 
   afterEach(async () => {
