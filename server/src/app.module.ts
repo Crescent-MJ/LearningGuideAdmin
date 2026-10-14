@@ -9,6 +9,7 @@ import { LessonsModule } from './lessons/lessons.module';
 import { PagesModule } from './pages/pages.module';
 import { ReleasesModule } from './releases/releases.module';
 import { SyncModule } from './sync/sync.module';
+import { AiModule } from './ai/ai.module';
 import { validateEnv } from './config/env.validation';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -31,6 +32,8 @@ import { ApiKeyGuard } from './common/guards/api-key.guard';
     PagesModule,
     ReleasesModule,
     SyncModule,
+    // AI Tutor 后端模块（§7 Phase 5、§5.2）
+    AiModule,
   ],
   controllers: [AppController],
   providers: [

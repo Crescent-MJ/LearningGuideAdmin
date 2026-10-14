@@ -16,7 +16,7 @@ Socratic 双模式流式对话、PromptTemplate 与课程级 AI 配置）。
 | 数据库 | PostgreSQL + Prisma ORM |
 | 前端 | React + TypeScript + Vite + Ant Design 5.x |
 | 状态管理 | Zustand（全局状态）+ React Context（少量轻量配置） |
-| 编辑器 | md-editor-v3（KaTeX 渲染） |
+| 编辑器 | @uiw/react-md-editor（KaTeX 渲染；2026-10-14 Phase 4 用户裁决，替代原 md-editor-v3） |
 
 ## 目录结构
 

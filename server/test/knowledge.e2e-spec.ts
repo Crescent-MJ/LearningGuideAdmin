@@ -28,7 +28,12 @@ describe('Knowledge API (e2e)', () => {
   afterAll(async () => {
     // 清理本轮测试创建的课程及其关联（Lesson/Page 由级联、Release 手动先行）
     const courses = await prisma.course.findMany({
-      where: { title: { startsWith: 'E2E-' } },
+      where: {
+        OR: [
+          { title: { startsWith: 'E2E-' } },
+          { externalId: 'ext-quantum-001' }, // sync 导入测试课程
+        ],
+      },
       select: { id: true },
     });
     const ids = courses.map((c) => c.id);
@@ -212,16 +217,55 @@ describe('Knowledge API (e2e)', () => {
     ).toBe(0);
   });
 
-  it('POST /api/sync/structure 与 /api/sync/all 返回 Mock 结构（§5.1.5）', async () => {
-    const s = await request(app.getHttpServer())
-      .post('/api/sync/structure')
-      .expect(201);
-    expect(s.body.data.mock).toBe(true);
-    expect(s.body.data.lessons[0].pages[0].contentMd).toBeUndefined();
-    const a = await request(app.getHttpServer())
+  it('POST /api/sync/all 导入外部课程并幂等（§3.2.2/§5.1.5）', async () => {
+    // 选择外部独有、本地未导入的课程做导入测试，避免污染 demo 数据
+    const externalId = 'ext-quantum-001';
+    const res = await request(app.getHttpServer())
       .post('/api/sync/all')
+      .send({ externalId })
       .expect(201);
-    expect(a.body.data.lessons[0].pages[0].contentMd).toBeDefined();
+    expect(res.body.success).toBe(true);
+    // 首次导入：1 章 + 2 页全部新建
+    expect(res.body.data.created).toBeGreaterThanOrEqual(3);
+    expect(res.body.data.unchanged).toBe(false);
+
+    // 本地课程应带外部内容落库
+    const course = await prisma.course.findFirst({
+      where: { externalId },
+      include: { lessons: { include: { pages: true } } },
+    });
+    expect(course).not.toBeNull();
+    const firstPage = course!.lessons[0].pages[0];
+    expect(firstPage.contentMd.length).toBeGreaterThan(0);
+    expect(firstPage.syncState).toBe('SYNCED');
+
+    // 再次同步：无变更（幂等）
+    const again = await request(app.getHttpServer())
+      .post('/api/sync/all')
+      .send({ externalId })
+      .expect(201);
+    expect(again.body.data.unchanged).toBe(true);
+  });
+
+  it('POST /api/sync/structure 缺少 externalId 应 400 VALIDATION_ERROR', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/sync/structure')
+      .send({})
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('GET /api/sync/external-courses 返回外部课程列表与状态（§5.1.5）', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/sync/external-courses')
+      .expect(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    const quantum = res.body.data.find(
+      (c: { externalId: string }) => c.externalId === 'ext-quantum-001',
+    );
+    expect(quantum).toBeDefined();
+    // 上一步已导入，状态应为 synced
+    expect(quantum.status).toBe('synced');
   });
 
   it('未知路由应返回统一 404 信封且无堆栈泄露（§5.3、§9）', async () => {
