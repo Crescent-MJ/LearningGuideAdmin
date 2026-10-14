@@ -49,6 +49,7 @@ model Lesson {
   title     String
   duration  Int? // 视频/内容预计时长（秒）
   sortOrder Int // 排序权重
+  syncState SyncState @default(SYNCED) // 外部源同步状态（§3.2.2）
   pages     Page[]
 
   @@index([courseId, sortOrder])
@@ -63,8 +64,15 @@ model Page {
   contentMd String @db.Text // 核心 Markdown 内容，支持 LaTeX
   tags     Json? // 标签数组，如 ["Core Knowledge", "Teaching Guidance"]
   sortOrder Int
+  syncState SyncState @default(SYNCED) // 外部源同步状态（§3.2.2）
 
   @@index([lessonId, sortOrder])
+}
+
+// 同步状态枚举（2026-10-14 新增，§3.2.2 外部源接管模型）
+enum SyncState {
+  SYNCED // 与外部源一致
+  STALE // 本地独有或外部已变更，已失效
 }
 
 // ==========================================

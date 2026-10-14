@@ -10,7 +10,7 @@
 | 数据库 | PostgreSQL + Prisma ORM |
 | 前端技术栈 | React + TypeScript + Vite |
 | UI 框架 | Ant Design 5.x |
-| Markdown 编辑器 | md-editor-v3（需支持 LaTeX/KaTeX） |
+| Markdown 编辑器 | ~~md-editor-v3~~ **@uiw/react-md-editor**（需支持 LaTeX/KaTeX；2026-10-14 Phase 4 用户裁决改拍，见 §3.3.2） |
 | 状态管理 | Zustand（全局状态）+ React Context（少量轻量配置，2026-10-14 拍板） |
 
 ---
@@ -89,6 +89,7 @@ model Lesson {
   title       String
   duration    Int?      // 视频/内容预计时长（秒）
   sortOrder   Int       // 排序权重
+  syncState   SyncState @default(SYNCED) // 外部源同步状态（§3.2.2）
   pages       Page[]
 
   @@index([courseId, sortOrder])
@@ -103,8 +104,15 @@ model Page {
   contentMd   String    @db.Text  // 核心 Markdown 内容，支持 LaTeX
   tags        Json?     // 标签数组，如 ["Core Knowledge", "Teaching Guidance"]
   sortOrder   Int
+  syncState   SyncState @default(SYNCED) // 外部源同步状态（§3.2.2）
 
   @@index([lessonId, sortOrder])
+}
+
+// 同步状态枚举（2026-10-14 新增，§3.2.2 外部源接管模型）
+enum SyncState {
+  SYNCED  // 与外部源一致
+  STALE   // 本地独有或外部已变更，已失效（置灰，不作 AI Tutor 知识库）
 }
 
 // ==========================================
@@ -203,6 +211,8 @@ Knowledge System 是系统的主界面，采用左右两栏布局：
 - **左侧**：课程目录树（Course -> Lesson -> Page），搜索框，Sync 按钮
 - **右侧**：Tab 页签，包含 "Knowledge Pages"（编辑器）和 "Publish"（版本发布）
 
+> **Phase 4 排版对齐注记（2026-10-14，按用户设计稿）**：整体为「顶部 Header + 模块导航列 + 课程树列 + 内容区」四段——Header 白底，左侧 logo+产品名、右侧通知铃铛与当前用户（演示身份静态占位）；模块导航列含 **Knowledge / AI Tutor** 两个入口（当前模块高亮，AI Tutor 为 Phase 6 占位页）；树列顶部搜索框、底部 Sync 按钮（Sync Structure Only 为文字链样式、Sync Structure & Course 为主色按钮）；预设标签配色：Core Knowledge 蓝 / Teaching Guidance 绿 / Misconception 橙 / Assessment 紫。
+
 ### 3.2 左侧边栏（Sidebar）
 
 #### 3.2.1 树形导航组件
@@ -212,16 +222,33 @@ Knowledge System 是系统的主界面，采用左右两栏布局：
 - Page 节点可点击选中，选中后右侧编辑器加载该 Page 的 Markdown 内容
 - 支持搜索框，按页面标题过滤树节点
 
-#### 3.2.2 Sync 同步按钮
+#### 3.2.2 Sync 同步（外部源接管模型）
 
-底部两个按钮：
+> **设计改拍（2026-10-14，Phase 4 用户裁决）**：原「全量强制覆盖」语义改为**非破坏性外部源接管模型**。外部源是课程主数据（master），本地在同步结果上做修改；再次同步**绝不覆盖或丢失本地内容**，过期内容以「灰度失效」标记交用户处置。
+
+**同步目标选取**：Sidebar 顶部为**外部课程选择器**（下拉列出外部源课程，带状态：未同步 / 已同步 / 有更新）。选中后**锁定**（显示当前课程名），需点「解锁」按钮才能更换（防编辑时误切）。未选中时两个 Sync 按钮禁用。原「新建课程」入口**彻底移除**——所有课程来自外部源同步。
+
+**两个按钮**：
 
 | 按钮 | 接口 | 行为 |
 |------|------|------|
-| Sync Structure Only | POST /api/sync/structure | 仅更新目录树结构（Course/Lesson/Page 的标题和排序），不覆盖 contentMd |
-| Sync Structure & Course | POST /api/sync/all | 全量同步。调用外部接口拉取最新的课程数据，强制刷新本地数据库中的内容（需弹框警告用户会丢失未保存的修改） |
+| Sync Structure Only | POST /api/sync/structure `{ externalId }` | 仅同步目录树结构（章节/页面标题、排序、增删节点），不写入正文 |
+| Sync Structure & Course | POST /api/sync/all `{ externalId }` | 同步结构 + 内容（非破坏性，见下表） |
 
-> **注意**：前期可使用 Mock 数据模拟外部 API 响应。
+**同步算法（按标题匹配外部↔本地节点）**：
+
+| 情形 | 行为 |
+|------|------|
+| 外部有、本地无 | 新增；标题冲突按 `标题-new`、`标题-new2` 递增 |
+| 两边都有、标题与内容一致 | 不动；全部一致返回 `unchanged`，前端提示「已与外部源一致，无变更」 |
+| 标题一致但外部内容变了 | 本地页 `syncState=STALE`（内容保留、可复制、交用户删除），外部新内容作为新页插入（走冲突命名） |
+| 本地有、外部无 | 本地节点 `syncState=STALE`，交用户删除 |
+
+**STALE（灰度失效）节点**：树中置灰 + Tooltip「该节点与外部源不同步，不会作为 AI Tutor 知识库使用；请复制所需内容后删除」。AI Tutor 侧过滤逻辑属 Phase 6。
+
+**响应**：`{ created, staleMarked, unchanged }` 变更摘要，供前端 message 提示（非破坏性模型下已有节点从不被 update，故无 updated 字段）。
+
+> **Mock 实现（2026-10-14）**：外部源为后端内存 fixture（`server/src/sync/demo-fixtures.ts`），真实外部 API 接入（§12 事项 #4）后替换数据源、同步算法不变。
 
 ### 3.3 右侧内容区 - Tab 1: Knowledge Pages（编辑器）
 
@@ -233,7 +260,7 @@ Knowledge System 是系统的主界面，采用左右两栏布局：
 
 #### 3.3.2 Markdown 编辑器要求
 
-- 使用 `md-editor-v3` 组件
+- ~~使用 `md-editor-v3` 组件~~ **编辑器选型改拍（2026-10-14，Phase 4 实装时用户裁决）**：`md-editor-v3` 为 Vue 3 组件库，与本项目 React 技术栈不兼容，改用 **`@uiw/react-md-editor`**（React 生态），KaTeX 经 `remark-math` + `rehype-katex` 插件接入
 - **必须开启 KaTeX 渲染**，支持 LaTeX 公式（如 `$E=mc^2$`）
 - 支持代码高亮
 - 支持实时预览
@@ -328,9 +355,10 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 #### 4.3.2 New Chat
 
-- 清空右侧对话框的当前聊天记录
-- 向后端发送请求创建新的 AiChatSession
+- 清空右侧对话框的当前聊天记录（含浏览器 localStorage 中的上次会话）
 - 显示 Welcome Message 作为 AI 的第一条消息
+
+> **对话持久化拍板（2026-10-14，§12 事项 #6）**：对话记录**不落库**。"上一次聊天"经浏览器 localStorage 持久化（按 courseId+mode 隔离），短时间退出页面再回来可恢复；点击 New Chat 清空；当前无长期记忆需求。`AiChatSession` 表保留（后续调试/持久化启用用），MVP 不写入，`/api/ai/sessions` 系列接口不实现。
 
 #### 4.3.3 对话流程
 
@@ -344,7 +372,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
    - 组装 Prompt：`System Prompt + [CONTEXT: 课程资料] + 用户消息`
    - 调用 LLM API（流式）
    - 将流式响应转发给前端
-   - 异步记录对话到 AiChatSession
+   - 对话不落库（2026-10-14 拍板，见 §4.3.2）
 4. 前端以流式（SSE 或 fetch stream）方式逐块渲染 AI 回复
 
 #### 4.3.4 对话消息格式
@@ -369,24 +397,27 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 {
   "courseId": "string",
   "message": "string",
-  "mode": "LECTURE | SOCRATIC"
+  "mode": "LECTURE | SOCRATIC",
+  "history": [{ "role": "user | assistant", "content": "string" }]
 }
 ```
+
+> `history` 为可选字段（2026-10-14 补充）：前端把 localStorage 会话的最近若干条随请求携带，后端仅取最近 10 条拼入多轮上下文，保证对话连续性（对话本身仍不落库）。
 
 响应：Stream（Server-Sent Events 格式）
 
 #### 4.4.2 核心处理逻辑
 
 1. **参数校验**：验证 courseId、message、mode 必填
-2. **加载配置**：根据 courseId 获取 CourseAiConfig，解析 LLM 提供商和模型
+2. **加载配置**：根据 courseId 获取 CourseAiConfig，解析 LLM 提供商和模型（apiKey 字段经 AES-256-GCM 解密后仅在内存中使用，环境变量 `AI_CONFIG_ENCRYPTION_KEY`，2026-10-14 拍板）
 3. **加载知识库上下文**：根据 courseId 查询所有 Lesson -> Page，聚合 Markdown 内容
 4. **组装 Prompt**：
    - 获取对应模式的 PromptTemplate（优先自定义，其次默认）
    - 拼接：`System Prompt` + `[CONTEXT_START]` + 课程资料 + `[CONTEXT_END]` + 用户消息
    - Socratic 模式额外注入引导指令：`"你是一个苏格拉底式的引导者。永远不要直接给出最终答案。将答案拆解成一系列反问和引导性问题，逐步启发用户自己得出结论。"`
-5. **代理转发**：使用对应 LLM 提供商的 Node.js SDK 调用实际 API（流式）
+5. **代理转发**：经 Provider 适配器（策略模式，首批接入 OpenRouter，OpenAI 兼容接口，2026-10-14 §12 事项 #2 拍板）调用实际 API（流式）
 6. **流式返回**：将 LLM 的流式 Chunk 以 SSE 格式转发给前端
-7. **日志记录**：异步将本次对话写入 AiChatSession 表
+7. **日志记录**：MVP 不落库（2026-10-14 拍板，见 §4.3.2；AiChatSession 表保留不写入）
 
 #### 4.4.3 错误处理
 
@@ -442,24 +473,24 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /api/sync/structure | 仅同步目录树结构（不覆盖内容） |
-| POST | /api/sync/all | 全量同步结构和内容 |
+| GET | /api/sync/external-courses | 列出外部源课程（含同步状态：未同步/已同步/有更新），供选择器 |
+| POST | /api/sync/structure | 仅同步目录树结构，body `{ externalId }` |
+| POST | /api/sync/all | 同步结构+内容（非破坏性），body `{ externalId }` |
 
-> 前期实现 Mock 版本，返回假数据模拟外部 API 响应。
+> 同步语义详见 §3.2.2（外部源接管模型）。Mock 阶段外部源为后端内存 fixture；真实外部 API 接入（§12 事项 #4）后替换数据源。
 
 ### 5.2 AI 相关接口
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | /api/ai/chat-stream | 流式 AI 对话（SSE 响应） |
-| GET | /api/ai/sessions | 获取某 Course 的对话记录 |
-| POST | /api/ai/sessions | 创建新对话 |
-| DELETE | /api/ai/sessions/:id | 删除对话 |
-| GET | /api/ai/models | 获取可用的 LLM 模型列表 |
+| GET | /api/ai/models | 获取可用的 LLM 模型列表（数据源 `AI_AVAILABLE_MODELS` env） |
 | GET | /api/ai/prompts | 获取 PromptTemplate 列表 |
 | PUT | /api/ai/config | 保存 CourseAiConfig |
-| GET | /api/ai/config/:courseId | 获取某 Course 的 AI 配置 |
+| GET | /api/ai/config/:courseId | 获取某 Course 的 AI 配置（apiKey 脱敏，绝不返回明文） |
 | POST | /api/ai/config/:courseId/reset | 重置为默认配置 |
+
+> 对话记录接口（GET/POST/DELETE `/api/ai/sessions`）不实现（2026-10-14 拍板：对话不落库，见 §4.3.2），待长期持久化启用后再补。
 
 ### 5.3 统一响应格式
 
@@ -538,6 +569,8 @@ client/
 └── vite.config.ts
 ```
 
+> **Phase 4 实装注记（2026-10-14）**：本轮实装 layout/ 与 knowledge/ 组件、pages/KnowledgeSystem.tsx、api/ 与 stores/knowledgeStore.ts。`ai-tutor/` 组件与 `pages/AITutor.tsx`、`api/ai.ts`、`stores/aiStore.ts`、`hooks/useAI.ts` 属 Phase 6；`hooks/` 其余文件与 `utils/` 未建——zustand store 直接承载状态与动作（标准用法，hooks 薄包装属重复抽象），版本号生成由后端完成（§3.4.3 第 4 步），Markdown 渲染由 @uiw/react-md-editor 承担，前端无对应工具需求。dev 环境 `/api` 经 vite.config.ts 代理至后端 :3000。
+
 ### 6.2 状态管理策略
 
 - 使用 Zustand 管理全局状态（当前选中的 Course/Lesson/Page、AI 配置、对话状态等；2026-10-14 拍板）
@@ -547,36 +580,29 @@ client/
 
 ### 6.3 Markdown 编辑器配置
 
-使用 `md-editor-v3` 的推荐配置：
+> **Phase 4 实装拍板（2026-10-14 用户裁决）**：原推荐的 `md-editor-v3` 为 Vue 3 库、与 React 不兼容，改用 `@uiw/react-md-editor`，KaTeX 经 `remark-math` + `rehype-katex` 接入（§3.3.2 同步更正）。实装配置：
 
 ```typescript
-import MarkdownEditor from 'md-editor-v3';
-import 'md-editor-v3/lib/style.css';
+import MDEditor from '@uiw/react-md-editor';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import 'katex/dist/katex.min.css';
 
-<MarkdownEditor
-  id="editor"
+// 注意：@uiw/react-md-editor 的预览基于 @uiw/react-markdown-preview（react-markdown 体系），
+// remark/rehype 插件必须经 previewOptions 传入，而非直接作为 MDEditor 顶层 props。
+<MDEditor
   value={content}
-  onChange={handleChange}
-  preview={false}
-  codeTheme="atom"
-  // 启用 KaTeX
-  renderHook={{
-    preRenderer: (code) => {
-      // KaTeX 渲染逻辑
-    }
+  onChange={(value) => handleChange(value ?? '')}
+  preview="live"           // 实时预览
+  style={{ height: '100%' }}
+  previewOptions={{
+    remarkPlugins: [remarkMath],
+    rehypePlugins: [rehypeKatex],  // KaTeX：$…$ 与 $$…$$
   }}
-  tools={[
-    'bold', 'underline', 'italic', 'strikeThrough', '-', 
-    'title', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', '-',
-    'quote', 'unorderedList', 'orderedList', '-',
-    'table', 'link', 'image', '-',
-    'code', 'codeBlock', '-',
-    'preview', 'fullscreen'
-  ]}
 />
 ```
 
-> 注意：需要额外配置 KaTeX 渲染器以支持 LaTeX 公式。建议安装 `md-editor-v3` 的 KaTeX 插件或使用 `react-markdown` + `remark-math` + `rehype-katex` 作为备选方案。
+> 代码高亮由 @uiw/react-md-editor 内置（highlight.js）；表格原生支持；编辑内容 500ms 防抖自动保存经 store 调度（§3.3.2）。
 
 ---
 
@@ -615,21 +641,22 @@ import 'md-editor-v3/lib/style.css';
 1. 搭建项目骨架（Vite + React + TypeScript + Ant Design）
 2. 实现 MainLayout 布局（左侧 Sidebar + 右侧 Tab 内容区）
 3. 实现 CourseTree 树形组件
-4. 实现 PageEditor 编辑器（集成 md-editor-v3 + KaTeX）
+4. 实现 PageEditor 编辑器（集成 @uiw/react-md-editor + KaTeX，2026-10-14 Phase 4 改拍）
 5. 实现 TagManager 标签管理
 6. 实现 PublishPanel 发布面板
 7. 实现 Sync 按钮逻辑
 8. 对接后端 API
+9. 演示种子数据：`server/prisma/seed-demo.ts`（4 门含公式/表格/标签的示例课程，按标题幂等判重），运行 `npm run seed:demo`（仅本地测试用，不并入业务 Seed）
 
 ### Phase 5: AI Tutor 后端
 
 1. 实现 PromptTemplate 管理接口
 2. 实现 CourseAiConfig 配置接口
 3. 实现 AI Gateway Proxy（策略模式）
-   - 实现 OpenAI 适配器
+   - 实现 OpenRouter 适配器（OpenAI 兼容，2026-10-14 拍板）
    - 预留其他 Provider 的接口
 4. 实现流式对话接口（SSE）
-5. 实现对话记录接口
+5. 实现限流（10 次/分钟/courseId）与 CourseAiConfig apiKey 加密存储（对话不落库，§4.3.2 拍板）
 
 ### Phase 6: AI Tutor 前端
 
@@ -660,11 +687,16 @@ DATABASE_URL="postgresql://user:password@localhost:5432/learning_guide_db"
 # JWT Secret（如需用户认证）
 JWT_SECRET="your-super-secret-jwt-key-change-in-production"
 
-# AI Provider 配置
-OPENAI_API_KEY="sk-xxx"
-OPENAI_BASE_URL="https://api.openai.com"
+# AI Provider 配置（首批接入 OpenRouter，OpenAI 兼容接口，2026-10-14 §12 事项 #2 拍板）
+OPENROUTER_API_KEY="sk-or-xxx"
+OPENROUTER_BASE_URL="https://openrouter.ai/api/v1"
+# 模型列表接口（GET /api/ai/models）数据源，逗号分隔；具体启用哪些模型由用户后续确认
+AI_AVAILABLE_MODELS="openai/gpt-4o-mini,anthropic/claude-3.5-sonnet"
 
-# 其他 Provider（按需启用）
+# CourseAiConfig.apiKey 加密密钥（AES-256-GCM；64 位 hex 即 32 字节，2026-10-14 拍板）
+AI_CONFIG_ENCRYPTION_KEY="0000...64位hex...0000"
+
+# 其他 Provider（按需启用，适配器预留）
 # DEEPSEEK_API_KEY="xxx"
 # ANTHROPIC_API_KEY="xxx"
 
@@ -745,10 +777,10 @@ ALLOWED_EXTENSIONS="txt,md,pdf,html,xlsx,xls,doc,docx,csv,xml,epub,ppt"
 以下事项需要在开发前与产品/架构师确认：
 
 1. **用户认证**：是否需要用户登录、多用户、权限管理？还是先做单人私有部署？（Phase 3 已拍板：单人私有部署，鉴权仅预留骨架，见 §7 Phase 3 注记；完整方案 Phase 7 定）
-2. **AI Provider**：初期接入哪些 LLM 提供商？（OpenAI、Claude、DeepSeek、本地模型）
+2. **AI Provider**：初期接入哪些 LLM 提供商？（2026-10-14 拍板：**OpenRouter**（OpenAI 兼容接口，经策略模式适配器接入）；具体启用模型清单由用户后续确认，数据源为 `AI_AVAILABLE_MODELS` env；其他 Provider 仅预留适配器接口）
 3. **文件转换**：是否允许调用外部服务？还是必须尽量本地 Node 完成？
 4. **外部同步源**：Sync 功能对接的外部 API 文档是否已就绪？接口格式如何？
 5. **历史版本回滚**：是否需要从 Release 快照回滚到某个历史版本？
-6. **AI 对话持久化**：对话记录是否需要长期保存？是否有数据保留策略？
+6. **AI 对话持久化**：对话记录是否需要长期保存？是否有数据保留策略？（2026-10-14 拍板：**不落库**；上次会话经浏览器 localStorage 持久化，New Chat 清空；无长期记忆需求，见 §4.3.2）
 7. **前端框架最终选定**：React + Vite 还是 Next.js？
 8. **部署环境**：生产环境部署在何处？（云服务器、Vercel + Railway 等）
