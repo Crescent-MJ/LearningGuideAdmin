@@ -1,0 +1,143 @@
+// Learning Guide BackOffice — Prisma Schema
+// 依据开发文档 §2《数据库模型设计（Prisma Schema）》逐字段照抄（v1.0）
+// 任何表结构变更必须通过 Prisma Migrate 管理，禁止手改数据库
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// 核心实体
+// ==========================================
+
+model User {
+  id      String   @id @default(uuid())
+  email   String   @unique
+  name    String?
+  courses Course[]
+}
+
+// 第一层：课程 (Course)
+model Course {
+  id            String   @id @default(uuid())
+  title         String
+  description   String?
+  externalId    String? // 对应外部同步源的 ID
+  structureJson Json? // 存储树形目录的原始结构，用于快速渲染
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  lessons  Lesson[]
+  releases Release[]
+  aiConfig CourseAiConfig?
+  // 以下两个为反向关联字段：Prisma 要求双向关系，文档 §2 缺失，为通过校验的最小补充
+  // （不在数据库中新增列；users 为隐式多对多，migrate 时会生成联接表 _CourseToUser）
+  users          User[]
+  aiChatSessions AiChatSession[]
+}
+
+// 第二层：章节 (Lesson)
+model Lesson {
+  id        String  @id @default(uuid())
+  courseId  String
+  course    Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  title     String
+  duration  Int? // 视频/内容预计时长（秒）
+  sortOrder Int // 排序权重
+  pages     Page[]
+
+  @@index([courseId, sortOrder])
+}
+
+// 第三层：页面/内容 (Page)
+model Page {
+  id       String  @id @default(uuid())
+  lessonId String
+  lesson   Lesson  @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+  title    String
+  contentMd String @db.Text // 核心 Markdown 内容，支持 LaTeX
+  tags     Json? // 标签数组，如 ["Core Knowledge", "Teaching Guidance"]
+  sortOrder Int
+
+  @@index([lessonId, sortOrder])
+}
+
+// ==========================================
+// 发布与版本控制
+// ==========================================
+
+model Release {
+  id            String   @id @default(uuid())
+  courseId      String
+  course        Course   @relation(fields: [courseId], references: [id])
+  versionTag    String // 版本号，格式: "CourseName_YYYYMMDDHHmmss"
+  revisionNotes String   @db.Text // 本次修订的备注
+  snapshotData  Json // 完整内容快照: { lessons: [{ id, title, pages: [{id, title, contentMd, tags}] }] }
+  createdAt     DateTime @default(now())
+
+  @@index([courseId, createdAt])
+}
+
+// ==========================================
+// AI Tutor 配置模块
+// ==========================================
+
+// AI 提示词模板库（预设两套模式）
+model PromptTemplate {
+  id           String   @id @default(uuid())
+  mode         String // 枚举: "LECTURE" | "SOCRATIC"
+  systemPrompt String   @db.Text // 系统提示词
+  welcomeMsg   String   @db.Text // 欢迎语
+  isDefault    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // 反向关联：被哪些课程引用
+  // 注：CourseAiConfig 存在两条指向本模型的关系（Lecture/Socratic），
+  // Prisma 要求多关系必须命名消歧，故拆分为两个反向列表字段（不影响数据库列结构）
+  lectureConfigs  CourseAiConfig[] @relation("LectureTemplate")
+  socraticConfigs CourseAiConfig[] @relation("SocraticTemplate")
+}
+
+// 课程专属的 AI 配置
+model CourseAiConfig {
+  id       String @id @default(uuid())
+  courseId String @unique
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  // 引用基础模板（两条关系分别命名以消歧）
+  lectureModeId    String?
+  socraticModeId   String?
+  lectureTemplate  PromptTemplate? @relation("LectureTemplate", fields: [lectureModeId], references: [id])
+  socraticTemplate PromptTemplate? @relation("SocraticTemplate", fields: [socraticModeId], references: [id])
+
+  // 覆盖自定义的提示词（可选，优先级高于模板）
+  customSystemPrompt String? @db.Text
+  customWelcomeMsg   String? @db.Text
+
+  // LLM 配置
+  llmProvider String // 如: "openai", "deepseek", "claude"
+  llmModel    String // 如: "gpt-4o", "gpt-3.5-turbo"
+  llmBaseUrl  String? // 可选的自定义 Base URL
+  apiKey      String? // 加密存储
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// AI 对话记录（后台调试用）
+model AiChatSession {
+  id        String   @id @default(uuid())
+  courseId  String
+  course    Course   @relation(fields: [courseId], references: [id])
+  messages  Json // 聊天记录: [{role: 'user'|'ai', content: string, createdAt: ISOString}]
+  mode      String // 当前对话使用的模式: "LECTURE" | "SOCRATIC"
+  createdAt DateTime @default(now())
+
+  @@index([courseId, createdAt])
+}

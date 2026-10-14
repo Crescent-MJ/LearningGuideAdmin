@@ -40,11 +40,11 @@ Node.js + TypeScript + PostgreSQL（Prisma），前端 React + Vite + Ant Design
 5. **自测**：接口按统一响应格式自测、Prisma Migrate 在空库可重放、前端手动冒烟（编辑器/KaTeX/流式渲染）；保留命令与输出作为证据
 6. **交接审查**：变更完成后必须交由 Review Agent（独立新上下文）审查，不得跳过、不得自行宣布完成
 7. **修复**：Blocking 项修复后重新送审，直至 APPROVE
-8. **收尾**：写【AI协作日志】、回填受影响文档（含设计文档同步）；大迭代按 Git 工作流推送分支并发 PR
+8. **收尾**：写【AI协作日志】（落盘 `docs/AI_Collaboration_Log.md`）、回填受影响文档（含设计文档同步）；大迭代按 Git 工作流推送分支并发 PR
 
 ### 技术约束
-- 后端 Node.js + TypeScript（strict）；数据库 PostgreSQL + Prisma ORM；**后端框架未定稿**（Express/Fastify/NestJS 三选一，开工前与用户确认），禁止自行拍板引入
-- 前端 React + TypeScript + Vite + Ant Design 5.x；Markdown 编辑器 md-editor-v3（必须开启 KaTeX 渲染）；状态管理 Zustand 或 React Context（与用户确认后统一）
+- 后端 Node.js + TypeScript（strict）+ **NestJS**（2026-10-14 拍板）；数据库 PostgreSQL + Prisma ORM
+- 前端 React + TypeScript + Vite + Ant Design 5.x；Markdown 编辑器 md-editor-v3（必须开启 KaTeX 渲染）；状态管理 Zustand（全局状态）+ React Context（少量轻量配置）
 - LLM 接入必须走策略模式/适配器（Provider 可替换），禁止把厂商 SDK 调用硬编码进业务代码
 - 所有 API 密钥经环境变量注入；AI 请求必须经后端 `/api/ai/chat-stream` 代理，严禁前端直连 LLM API
 - 所有 API 响应使用统一格式 `{success, data, error, message}`
@@ -63,5 +63,5 @@ Node.js + TypeScript + PostgreSQL（Prisma），前端 React + Vite + Ant Design
 - [ ] 增删改查 / 接口 / 表结构变更已同步回设计文档
 - [ ] 自测通过（附命令与输出）
 - [ ] Review Agent 结论为 APPROVE
-- [ ] 【AI协作日志】已写、受影响文档已回填
+- [ ] 【AI协作日志】已写入 `docs/AI_Collaboration_Log.md`、受影响文档已回填
 - [ ] 大迭代：分支已推送 GitHub、PR 已建立
