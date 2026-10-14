@@ -74,6 +74,22 @@ describe('Knowledge API (e2e)', () => {
     );
   });
 
+  it('PUT /api/courses/:id 更新课程（§5.1.1）', async () => {
+    const res = await request(app.getHttpServer())
+      .put(`/api/courses/${courseId}`)
+      .send({ description: '更新后的描述' })
+      .expect(200);
+    expect(res.body.data.description).toBe('更新后的描述');
+  });
+
+  it('PUT /api/courses/:id 课程不存在应 404 NOT_FOUND', async () => {
+    const res = await request(app.getHttpServer())
+      .put('/api/courses/00000000-0000-0000-0000-000000000000')
+      .send({ description: 'x' })
+      .expect(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
+  });
+
   it('POST /api/courses/:courseId/lessons 创建章节（§5.1.2）', async () => {
     const res = await request(app.getHttpServer())
       .post(`/api/courses/${courseId}/lessons`)
