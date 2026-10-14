@@ -647,7 +647,7 @@ import 'md-editor-v3/lib/style.css';
 
 ## 8. 环境变量配置
 
-项目根目录创建 `.env` 文件：
+在 `server/` 目录创建 `.env` 文件（后端进程按 cwd 加载；Phase 1 实装起位置，2026-10-14 拍板更正原「项目根目录」表述）：
 
 ```env
 # 数据库
