@@ -43,8 +43,8 @@ Node.js + TypeScript + PostgreSQL（Prisma），前端 React + Vite + Ant Design
 8. **收尾**：写【AI协作日志】、回填受影响文档（含设计文档同步）；大迭代按 Git 工作流推送分支并发 PR
 
 ### 技术约束
-- 后端 Node.js + TypeScript（strict）；数据库 PostgreSQL + Prisma ORM；**后端框架未定稿**（Express/Fastify/NestJS 三选一，开工前与用户确认），禁止自行拍板引入
-- 前端 React + TypeScript + Vite + Ant Design 5.x；Markdown 编辑器 md-editor-v3（必须开启 KaTeX 渲染）；状态管理 Zustand 或 React Context（与用户确认后统一）
+- 后端 Node.js + TypeScript（strict）+ **NestJS**（2026-10-14 拍板）；数据库 PostgreSQL + Prisma ORM
+- 前端 React + TypeScript + Vite + Ant Design 5.x；Markdown 编辑器 md-editor-v3（必须开启 KaTeX 渲染）；状态管理 Zustand（全局状态）+ React Context（少量轻量配置）
 - LLM 接入必须走策略模式/适配器（Provider 可替换），禁止把厂商 SDK 调用硬编码进业务代码
 - 所有 API 密钥经环境变量注入；AI 请求必须经后端 `/api/ai/chat-stream` 代理，严禁前端直连 LLM API
 - 所有 API 响应使用统一格式 `{success, data, error, message}`

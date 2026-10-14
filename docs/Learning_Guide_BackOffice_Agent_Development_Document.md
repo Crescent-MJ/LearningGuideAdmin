@@ -6,12 +6,12 @@
 |------|------|
 | 项目名称 | Learning Guide BackOffice |
 | 文档版本 | v1.0 |
-| 后端技术栈 | Node.js + TypeScript |
+| 后端技术栈 | Node.js + TypeScript（NestJS，2026-10-14 拍板） |
 | 数据库 | PostgreSQL + Prisma ORM |
 | 前端技术栈 | React + TypeScript + Vite |
 | UI 框架 | Ant Design 5.x |
 | Markdown 编辑器 | md-editor-v3（需支持 LaTeX/KaTeX） |
-| 状态管理 | Zustand 或 React Context |
+| 状态管理 | Zustand（全局状态）+ React Context（少量轻量配置，2026-10-14 拍板） |
 
 ---
 
@@ -48,6 +48,7 @@
 ## 2. 数据库模型设计（Prisma Schema）
 
 > 注意：以下 Schema 为最终版，Agent 开发前必须严格按此创建并执行 `prisma migrate dev`。
+> 实装锁定 Prisma 6.x（v7 起移除 `url=env()` 写法，2026-10-14 拍板暂锁 6.x；双向关系已按 Prisma 要求补齐）。
 
 ```prisma
 // ==========================================
@@ -74,6 +75,10 @@ model Course {
   lessons         Lesson[]
   releases        Release[]
   aiConfig        CourseAiConfig?
+  // 反向关联（Prisma 双向关系要求，2026-10-14 补齐）：users 为隐式多对多，
+  // migrate 时生成联接表 _CourseToUser（2026-10-14 拍板方案 a）
+  users           User[]
+  aiChatSessions  AiChatSession[]
 }
 
 // 第二层：章节 (Lesson)
@@ -132,8 +137,9 @@ model PromptTemplate {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  // 反向关联：被哪些课程引用
-  courseConfigs   CourseAiConfig[]
+  // 反向关联：被哪些课程引用（CourseAiConfig 双外键需 Prisma 多关系命名消歧，2026-10-14 补齐）
+  lectureConfigs  CourseAiConfig[] @relation("LectureTemplate")
+  socraticConfigs CourseAiConfig[] @relation("SocraticTemplate")
 }
 
 // 课程专属的 AI 配置
@@ -145,8 +151,8 @@ model CourseAiConfig {
   // 引用基础模板
   lectureModeId       String?
   socraticModeId      String?
-  lectureTemplate     PromptTemplate? @relation(fields: [lectureModeId], references: [id])
-  socraticTemplate    PromptTemplate? @relation(fields: [socraticModeId], references: [id])
+  lectureTemplate     PromptTemplate? @relation("LectureTemplate", fields: [lectureModeId], references: [id])
+  socraticTemplate    PromptTemplate? @relation("SocraticTemplate", fields: [socraticModeId], references: [id])
 
   // 覆盖自定义的提示词（可选，优先级高于模板）
   customSystemPrompt  String? @db.Text
@@ -532,7 +538,8 @@ client/
 
 ### 6.2 状态管理策略
 
-- 使用 Zustand 管理全局状态（当前选中的 Course/Lesson/Page、AI 配置、对话状态等）
+- 使用 Zustand 管理全局状态（当前选中的 Course/Lesson/Page、AI 配置、对话状态等；2026-10-14 拍板）
+- React Context 仅用于少量轻量配置（如界面偏好），不承载复杂状态
 - 各模块状态尽量隔离，避免跨模块耦合
 - 服务端状态可使用 React Query (TanStack Query) 管理
 
@@ -583,7 +590,7 @@ import 'md-editor-v3/lib/style.css';
 
 ### Phase 2: 后端基础
 
-1. 搭建 Node.js 服务器（Express/Fastify/NestJS）
+1. 搭建 NestJS 服务器（2026-10-14 拍板）
 2. 配置 TypeScript 编译环境
 3. 实现 Prisma 客户端单例
 4. 实现统一响应格式中间件

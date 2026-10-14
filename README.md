@@ -12,9 +12,10 @@ Socratic 双模式流式对话、PromptTemplate 与课程级 AI 配置）。
 
 | 层 | 选择 |
 |---|---|
-| 后端 | Node.js + TypeScript（框架待定：Express / Fastify / NestJS，开工前与用户确认） |
+| 后端 | Node.js + TypeScript + NestJS（2026-10-14 拍板） |
 | 数据库 | PostgreSQL + Prisma ORM |
 | 前端 | React + TypeScript + Vite + Ant Design 5.x |
+| 状态管理 | Zustand（全局状态）+ React Context（少量轻量配置） |
 | 编辑器 | md-editor-v3（KaTeX 渲染） |
 
 ## 目录结构
@@ -22,8 +23,8 @@ Socratic 双模式流式对话、PromptTemplate 与课程级 AI 配置）。
 ```
 docs/        开发文档
 agents/      双智能体定义（Dev / Review）
-server/      后端（Node.js + TypeScript + Prisma，待搭建）
-client/      前端（React + Vite + Ant Design，待搭建）
+server/      后端（NestJS + Prisma，Phase 1 已搭建）
+client/      前端（React + Vite + Ant Design 5.x，Phase 1 已搭建）
 ```
 
 ## 协作工作流
@@ -37,5 +38,26 @@ client/      前端（React + Vite + Ant Design，待搭建）
 
 ## 开发
 
-（按开发文档 §7 Phase 1 起步：分别初始化 `server/` 与 `client/`、配置 PostgreSQL、
-Prisma 建模与 Seed；后端框架等待定项在开工前与用户确认后补充环境搭建与运行说明）
+### 后端（server/）
+
+```bash
+cd server
+npm install
+npx prisma migrate dev   # 应用迁移
+npx prisma db seed       # 种子数据（幂等）
+npm run start:dev        # http://localhost:3000
+```
+
+### 前端（client/）
+
+```bash
+cd client
+npm install
+npm run dev              # http://localhost:5173
+```
+
+### 数据库
+
+本机 PostgreSQL 16（Windows 服务名 `postgresql-x64-16`），账号/密码均为 admin，
+库名 learning_guide_db；连接串存于 `server/.env`（不入库），模板见 `server/.env.example`。
+表结构变更只走 Prisma Migrate，禁止手改数据库。
