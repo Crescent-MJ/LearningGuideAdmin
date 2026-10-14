@@ -410,6 +410,8 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 | PUT | /api/courses/:id | 更新 Course |
 | DELETE | /api/courses/:id | 删除 Course（级联删除 Lesson 和 Page） |
 
+> **删除保护（2026-10-14 拍板）**：Course 下已存在 Release 历史版本时拒绝删除，返回 409 `CONFLICT`（message 提示先处理历史版本），以保证发布快照完整可回放；级联删除仅作用于 Lesson/Page。
+
 #### 5.1.2 章节 CRUD
 
 | 方法 | 路径 | 说明 |
@@ -606,6 +608,8 @@ import 'md-editor-v3/lib/style.css';
 5. 实现 Sync 接口（Mock 版本）
 6. 实现接口鉴权中间件（基础版）
 
+> **鉴权基础版口径（2026-10-14 拍板，对应 §12 事项 #1）**：Phase 3 仅实现 Guard 骨架——全局注册 `ApiKeyGuard`，由环境变量 `AUTH_ENABLED`（默认 `false`）控制开关；开启时校验请求头 `X-API-Key` 等于 `AUTH_TOKEN`，不匹配返回 401 `UNAUTHORIZED`。完整用户认证（JWT/多用户）推迟至 Phase 7 再行确认。
+
 ### Phase 4: Knowledge System 前端
 
 1. 搭建项目骨架（Vite + React + TypeScript + Ant Design）
@@ -740,7 +744,7 @@ ALLOWED_EXTENSIONS="txt,md,pdf,html,xlsx,xls,doc,docx,csv,xml,epub,ppt"
 
 以下事项需要在开发前与产品/架构师确认：
 
-1. **用户认证**：是否需要用户登录、多用户、权限管理？还是先做单人私有部署？
+1. **用户认证**：是否需要用户登录、多用户、权限管理？还是先做单人私有部署？（Phase 3 已拍板：单人私有部署，鉴权仅预留骨架，见 §7 Phase 3 注记；完整方案 Phase 7 定）
 2. **AI Provider**：初期接入哪些 LLM 提供商？（OpenAI、Claude、DeepSeek、本地模型）
 3. **文件转换**：是否允许调用外部服务？还是必须尽量本地 Node 完成？
 4. **外部同步源**：Sync 功能对接的外部 API 文档是否已就绪？接口格式如何？

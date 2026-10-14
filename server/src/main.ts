@@ -2,9 +2,12 @@ import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { configureApp } from './common/app-setup';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  // /api 全局前缀 + 输入校验（§5.1、§9.3），与 e2e 共用同一设置
+  configureApp(app);
   // PORT 经 ConfigService 读取，缺省 3000（开发文档 §7 Phase 2 第 6 项、§8）
   const configService = app.get(ConfigService);
   const port = Number(configService.get<string>('PORT') ?? 3000);

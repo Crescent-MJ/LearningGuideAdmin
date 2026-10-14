@@ -1,12 +1,18 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
+import { CoursesModule } from './courses/courses.module';
+import { LessonsModule } from './lessons/lessons.module';
+import { PagesModule } from './pages/pages.module';
+import { ReleasesModule } from './releases/releases.module';
+import { SyncModule } from './sync/sync.module';
 import { validateEnv } from './config/env.validation';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { ApiKeyGuard } from './common/guards/api-key.guard';
 
 @Module({
   imports: [
@@ -19,6 +25,12 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     }),
     // Prisma 客户端单例（§7 Phase 2 第 3 项）
     PrismaModule,
+    // Knowledge System 后端模块（§7 Phase 3、§5.1）
+    CoursesModule,
+    LessonsModule,
+    PagesModule,
+    ReleasesModule,
+    SyncModule,
   ],
   controllers: [AppController],
   providers: [
@@ -27,6 +39,8 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     { provide: APP_INTERCEPTOR, useClass: TransformInterceptor },
     // 全局错误处理（§5.3、§7 Phase 2 第 5 项）
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
+    // 接口鉴权骨架（§7 Phase 3 第 6 项注记：AUTH_ENABLED 默认 false，不拦截）
+    { provide: APP_GUARD, useClass: ApiKeyGuard },
   ],
 })
 export class AppModule {}
