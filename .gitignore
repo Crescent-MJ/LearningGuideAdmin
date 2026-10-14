@@ -8,6 +8,17 @@ desktop.ini
 .idea/
 *.swp
 
+# 密钥与环境（.env.example 除外）
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
 # 日志与临时文件
 *.log
 *.tmp

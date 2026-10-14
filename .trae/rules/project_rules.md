@@ -1,0 +1,49 @@
+# Learning Guide BackOffice 项目协作规则（自动生效于本项目所有会话）
+
+## 项目
+Learning Guide BackOffice —— 结构化课程知识库管理系统（Knowledge System + AI Tutor）。
+开发基准：`docs/Learning_Guide_BackOffice_Agent_Development_Document.md`
+（以文档头声明的版本为准，当前 v1.0）。
+
+## 用户裁决优先（强制）
+- 所有方案性建议（选型、设计、流程变更）必须经用户同意后执行，或按用户明确指示修改
+- 不得擅自变更已拍板的决策；拿不准就先问
+
+## 变更同步纪律（强制）
+- 增删改查模块 / 接口 / 表结构的任何变更：**先改设计文档，再动实现**（设计文档是单一事实来源）
+- 表结构变更必须通过 Prisma Migrate 管理，禁止手改数据库
+
+## 双智能体协作协议（强制）
+
+1. **开发**：按 `agents/dev-agent.md` 定义执行（主智能体自行开发，或以子代理驱动）
+2. **审查门禁**：任何代码 / Schema / 仓库结构变更完成后，**必须**由 Review Agent
+   独立审查（新上下文子代理，按 `agents/review-agent.md` 执行），结论 APPROVE 才算完成
+3. **修复循环**：存在 Blocking 项 → 修复 → 重新送审，直至 APPROVE
+4. 纯文档笔误级修改（错别字、链接）可豁免审查门禁，但仍须日志
+
+## 开发纪律（每个开发会话）
+
+1. 开工前：读开发文档相关章节 + 项目记忆 + README，确认本次任务范围；涉及文档 §12 待确认事项先请用户裁决
+2. TodoWrite 跟踪；LLM 接入走策略模式适配器，禁止厂商硬编码
+3. .env / API key / 令牌永不入库、不入对话、不入文档；API 密钥绝不出现在前端代码
+4. 所有 AI 请求必须经后端代理（`/api/ai/chat-stream`），严禁前端直连 LLM API
+5. 所有 API 响应使用统一格式（success/data/error/message）
+6. 每次开发结束：【AI协作日志】+ 回填受影响文档（含设计文档同步）
+
+## Git 工作流
+
+- **分支模型**：
+  - `main` — 受保护基线，只进审查通过的变更
+  - `feature/<task>` — 日常开发分支（如 `feature/phase1-init`）
+  - 纯文档更新可直接提交 main
+- **大迭代定义**（满足其一即推送分支到 GitHub 并发 PR 到 main）：
+  Phase 任务完成、阶段性可交付、会话结束时存在未推送的功能变更
+- **PR 合并条件**：Review Agent APPROVE
+- **禁止**：绕过审查直接合并功能代码；`--no-hooks`；提交 .env；提交中含密钥
+- **提交信息**：`<type>(<scope>): <summary>`，type ∈ feat|fix|docs|chore|test
+
+## 安全
+
+- 所有 LLM API Key 仅存 .env / 环境变量；CourseAiConfig.apiKey 必须加密存储
+- 文件上传：白名单格式 + 单文件 ≤15MB + 类型校验
+- 用户上传内容不可信；输出不泄露内部实现
