@@ -5,6 +5,27 @@
 
 ---
 
+## 2026-10-15 ｜ 细节调整第二轮：Knowledge 左侧面板（目标过滤 + 去锁 + 点击展开 + 文档上传）
+
+- **任务**：用户附截图反馈 Knowledge 面板 4 点调整：① 课程树按同步目标过滤（选 Calculus Fundamentals 只显示其 lessons，不混显 Population Growth）② 移除同步目标上锁/解锁功能 ③ 点击课程名下拉 lessons、隐藏原生箭头并另设提示 ④ 实现此前未落地的文档上传功能
+- **用户拍板**：
+  - ① 转换引擎=**markitdown-ts 本地转换**（内存 Buffer 直转、不落盘、不调外部服务；§12 事项 #3 落文）
+  - ② 上传落地=**指定 Lesson 下新建 Page**，标题=文件名去扩展名，新页 syncState=SYNCED
+  - ③ 切换同步目标=先 flushSave 再清空编辑器，之后恢复该课程**上次编辑页**（lastPageIdByCourse 记忆）
+  - ④ 白名单按 markitdown-ts 实测支持面调整：**.txt/.md/.csv/.pdf/.docx/.xlsx/.html/.xml**（xls/doc/ppt/epub 不支持，原 §10.1 清单勘误）
+  - ⑤ 展开提示方案=CSS 隐藏 `.ant-tree-switcher` + 行尾 chevron（收起▸/展开▾旋转）
+- **变更清单**：
+  - **设计文档先行同步**：§3.2.1（树过滤+隐藏箭头+chevron）、§3.2.2（无锁常驻下拉+flushSave+上次编辑页）、**新增 §3.2.3**（上传流程：预校验→multipart file+lessonId→白名单/15MB 二次校验→本地转换→建页）、§5.1.6（POST /api/files/upload）、§10.1/10.2/10.3、§12 #3 拍板落文
+  - **后端**：新增 `src/files/`（module/controller/service/dto）——FileInterceptor memoryStorage + `limits:{fileSize:15MB, files:1}`；`markitdown.convertBuffer(buffer,{file_extension:'.docx'})`（**扩展名必须带点**，实测教训）；复用 PagesService 建页（pages.module 加 exports）；转换失败原始错误仅 logger.warn 不外泄；`fixFilenameEncoding` 修复 busboy 按 latin1 解析 multipart 中文文件名乱码；`all-exceptions.filter.ts` 增 413→400 映射（Nest `transformException` 先把全部 MulterError 转 PayloadTooLargeException，原 MulterError 分支为死代码已删，Review 核实成立）；app.module 注册 FilesModule
+  - **前端**：`api/knowledge.ts`（uploadFile FormData 封装 timeout 60s、白名单/上限常量与后端逐字一致）；`knowledgeStore.ts`（删 externalLocked/unlockExternal 全仓无残留、selectExternal 改 async、lastPageIdByCourse、uploadDocument 动作）；`Sidebar.tsx`（锁卡片 UI 移除、常驻 Select）；`CourseTree.tsx`（visibleCourseId 过滤、行点击 toggleRow 展开、chevron、Lesson 菜单「上传文档建页」+前端预校验、双分支空态）；`SyncButtons.tsx` 去锁依赖；`index.css` 加 `.course-tree-no-switcher`
+  - **依赖**：server +`markitdown-ts`、+`@types/multer`（devDep）
+- **自测证据**：server `tsc --noEmit` 0 错误、client `tsc -b` 0 错误；单测 9 套件 **35/35**（新增 files 5 用例：md 真实转换建页、.exe/.epub 400、空 buffer/无扩展名 400、转换结果空 400、latin1 乱码文件名还原）；e2e 4 套件 **46/46**（新增 files 8 用例：md 上传 201+落库校验、.exe 400、缺 lessonId 400、非法 UUID 400、lesson 不存在 404、无 file 字段 400、15MB+1→400「文件大小超过 15MB 限制」、错误信封不泄露堆栈）；开发前真实样本实测：docx 6799 字符、pdf 1567 字符转换成功。冒烟按口径由用户手动执行
+- **审查结论**：Review Agent 独立审查（新上下文）首轮即 **APPROVE，0 Blocking**。9 项 Non-blocking 留档：#1 selectExternal 在 flushSave 失败时仍清空草稿（网络异常可静默丢草稿）、#2 快速连续切换目标竞态（await 后未复查当前目标）、#3 toggleRow 在 setState updater 内调 store 副作用（StrictMode 双调用抖动）、#4 上传端点无速率限制（§9.4 泛化要求，口径需用户裁决）、#5 413→400 映射全局生效（当前仅 files 端点产生 413，无实际影响）、#6 过滤器 413 分支无直接单测（e2e 已覆盖端到端）、#7 无扩展名文件前端预校验提示文案（"Makefile"→提示「格式暂不支持：e」）、#8 §3.2.1 chevron 措辞仅提课程行（实现同样用于章节行，下轮文档回填顺带补）、#9 本日志条目（已补）
+- **Git**：用户拍板不建分支，本地提交 main（与上轮 c5958b5 攒批，未推送；冒烟反馈修完后统一推分支/PR）
+- **下一步**：用户重启后端手动冒烟四项（切换目标树过滤、点击展开交互、真实 docx/pdf 上传建页、去锁后同步按钮行为）→ 反馈修复 → 攒批推送分支
+
+---
+
 ## 2026-10-15 ｜ 细节调整：Publish 激活版本模型（历史版本可切换 + AI 知识源改读快照）
 
 - **任务**：用户手动冒烟 Phase 4/5/6 后反馈 Knowledge 流程差距（4 点梳理），本轮实现其中第 4 点：Publish = ①浏览历史并切换 ②发布后 AI Tutor 以该版为知识库、草稿同步变为该版可编辑版
@@ -22,7 +43,7 @@
   - **前端**：`api/knowledge.ts`（ReleaseSummary.isActive、ReleaseDetail 改 Omit+可选、activateRelease 封装）；`knowledgeStore.ts` 新增 afterActivateRelease（清防抖定时器+丢弃草稿+刷新树，防旧草稿写回已覆盖的树）；`PublishPanel.tsx`（Current Version/Revision Notes 列改按激活版本渲染、历史 Modal「激活中」绿标+「切换到此版本」danger 二次确认）
 - **自测证据**：server `tsc --noEmit` 0 错误；单测 8 套件 **30/30**（含发布即激活、事务内 SYNCED 过滤断言、activate 重建/归属 404、isActive 标注）；e2e 3 套件 **38/38**（新增 activate 端到端切版本重建草稿树+新 ID 回写、未发布课程 400、限流夹具前置发布；ai 夹具 afterAll 补删 Release 防外键）；空库重放：临时库 `migrate deploy` 3 迁移全部成功（验证后已删）；client `tsc -b` 0 错误。冒烟按新口径由用户手动执行
 - **审查结论**：Review Agent 独立审查首轮 **REQUEST_CHANGES**（1 Blocking：publish 快照读取在事务外，违反 §3.4.3「单事务」；修复移入 $transaction 后复审 **APPROVE**）。Non-blocking 处置：#2 ReleaseDetail.isActive 类型已修、#3 §3.4.1 措辞经用户裁决已修；留档后续：#4 activate N+1 可改 createMany、#5 边界用例补充（空 releaseId 400/courseId 404/全 STALE 空快照）、#6 悬空指针 400 提示语义；已知限制：快照不含 duration，切换版本后章节时长丢失（当前无功能消费，若启用先改文档 §2 快照结构）
-- **Git**：未推送（待用户裁决是否建分支/PR，见下）
+- **Git**：用户拍板不建分支，本地提交 main `c5958b5`（ahead 1，未推送；后续攒调整一起推）
 - **下一步**：用户重启后端后手动冒烟（发布→编辑→切历史版本→AI 对话验证知识源为激活版）→ 反馈修复 → Phase 7 剩余项
 
 ---

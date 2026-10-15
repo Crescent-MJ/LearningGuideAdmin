@@ -33,8 +33,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       // HttpException 按状态码映射业务错误码
       status = exception.getStatus();
-      code = this.mapHttpStatusToCode(status);
-      message = this.extractHttpExceptionMessage(exception);
+      if (status === HttpStatus.PAYLOAD_TOO_LARGE) {
+        // Nest 将 multer 文件超限（§10.1：15MB）统一转为 413，
+        // 对外按 §3.2.3 约定映射为 400 校验错误
+        status = HttpStatus.BAD_REQUEST;
+        code = 'VALIDATION_ERROR';
+        message = '文件大小超过 15MB 限制';
+      } else {
+        code = this.mapHttpStatusToCode(status);
+        message = this.extractHttpExceptionMessage(exception);
+      }
     } else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
       // Prisma 已知错误码映射为合理业务码（不向外暴露 meta/SQL）
       const mapped = this.mapPrismaError(exception.code);

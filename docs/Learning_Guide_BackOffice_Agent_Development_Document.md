@@ -220,15 +220,17 @@ Knowledge System 是系统的主界面，采用左右两栏布局：
 #### 3.2.1 树形导航组件
 
 - 实现三级嵌套树形组件：Course（一级）-> Lesson（二级）-> Page（三级）
-- Course 节点可展开/收起
+- **树按同步目标过滤（2026-10-15 用户裁决）**：树中只显示当前同步目标对应的本地课程（经 `GET /api/sync/external-courses` 的 `localCourseId` 映射）；目标尚未同步（无本地课程）时显示空态提示「该课程尚未同步，点击下方 Sync 拉取」。不再一次展示全部本地课程
+- Course 节点展开/收起（2026-10-15 改）：**隐藏 AntD Tree 原生左侧箭头**，点击课程行任意位置即展开/收起；行尾（⋮ 菜单左侧）放旋转 chevron（收起 ▸ / 展开 ▾）作为可展开提示，配合整行 hover 高亮
 - Page 节点可点击选中，选中后右侧编辑器加载该 Page 的 Markdown 内容
 - 支持搜索框，按页面标题过滤树节点
+- Lesson 节点悬停菜单含「**上传文档建页**」（见 §3.2.3）
 
 #### 3.2.2 Sync 同步（外部源接管模型）
 
 > **设计改拍（2026-10-14，Phase 4 用户裁决）**：原「全量强制覆盖」语义改为**非破坏性外部源接管模型**。外部源是课程主数据（master），本地在同步结果上做修改；再次同步**绝不覆盖或丢失本地内容**，过期内容以「灰度失效」标记交用户处置。
 
-**同步目标选取**：Sidebar 顶部为**外部课程选择器**（下拉列出外部源课程，带状态：未同步 / 已同步 / 有更新）。选中后**锁定**（显示当前课程名），需点「解锁」按钮才能更换（防编辑时误切）。未选中时两个 Sync 按钮禁用。原「新建课程」入口**彻底移除**——所有课程来自外部源同步。
+**同步目标选取**：Sidebar 顶部为**外部课程选择器**（下拉列出外部源课程，带状态：未同步 / 已同步 / 有更新）。**选中即切换、无锁定/解锁机制（2026-10-15 用户裁决，原「锁定防误切」机制移除）**：切换目标前自动 `flushSave` 落盘当前草稿，树与编辑器随之切到新目标课程，并**自动选中该课程上次编辑的页面**（前端按 courseId 记忆 lastPageId；无记忆或课程为空则不选）。未选中时两个 Sync 按钮禁用。原「新建课程」入口**彻底移除**——所有课程来自外部源同步。
 
 **两个按钮**：
 
@@ -251,6 +253,13 @@ Knowledge System 是系统的主界面，采用左右两栏布局：
 **响应**：`{ created, staleMarked, unchanged }` 变更摘要，供前端 message 提示（非破坏性模型下已有节点从不被 update，故无 updated 字段）。
 
 > **Mock 实现（2026-10-14）**：外部源为后端内存 fixture（`server/src/sync/demo-fixtures.ts`），真实外部 API 接入（§12 事项 #4）后替换数据源、同步算法不变。
+
+#### 3.2.3 上传文档建页（2026-10-15 实现落地）
+
+- **入口**：树中 Lesson 节点悬停菜单「上传文档建页」→ 系统文件选择器（单选）
+- **流程**：前端预校验（扩展名白名单 + ≤15MB，§10.1）→ `POST /api/files/upload`（multipart：`file` + `lessonId`）→ 后端二次校验 → markitdown-ts **本地**转换（§12 事项 #3 拍板，不调外部服务）→ 在该 Lesson 下新建 Page（标题=文件名去扩展名，contentMd=转换结果，`syncState=SYNCED`）→ 返回新 Page，前端刷新树并自动选中进编辑器
+- **失败**：格式不支持/超限/转换失败均返回 400（统一响应格式），前端 message 提示，不落任何文件到磁盘（内存 Buffer 直转，无临时目录）
+- 音视频文件**不在本轮范围**（2026-10-15 拍板，随 §12 事项 #4 真实外部源接入一并设计）
 
 ### 3.3 右侧内容区 - Tab 1: Knowledge Pages（编辑器）
 
@@ -490,6 +499,12 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 | POST | /api/sync/all | 同步结构+内容（非破坏性），body `{ externalId }` |
 
 > 同步语义详见 §3.2.2（外部源接管模型）。Mock 阶段外部源为后端内存 fixture；真实外部 API 接入（§12 事项 #4）后替换数据源。
+
+#### 5.1.6 文件上传（2026-10-15 新增，§3.2.3/§10）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | /api/files/upload | multipart：`file`（白名单+≤15MB，§10.1）+ `lessonId`；markitdown-ts 本地转 Markdown 后在该 Lesson 下新建 Page 并返回（含 contentMd）；校验/转换失败 400 |
 
 ### 5.2 AI 相关接口
 
@@ -761,17 +776,19 @@ ALLOWED_EXTENSIONS="txt,md,pdf,html,xlsx,xls,doc,docx,csv,xml,epub,ppt"
 |--------|------|
 | 文件数量 | 单次最多 1 个文件 |
 | 文件大小 | 最大 15MB |
-| 允许格式 | txt, md, pdf, html, xlsx, xls, doc, docx, csv, xml, epub, ppt |
+| 允许格式 | txt, md, csv, pdf, docx, xlsx, html, xml |
+
+> **白名单改拍（2026-10-15，用户裁决）**：原表（含 xls/doc/ppt/epub）按 markitdown-ts 实测支持面调整——旧二进制格式 xls/doc/ppt 与 epub 不支持（上传时明确提示「格式暂不支持」）。
 
 ### 10.2 处理流程
 
 1. 前端校验文件类型和大小
-2. 上传到后端 `POST /api/files/upload`
-3. 后端校验文件类型和白名单
-4. 存储到临时目录或对象存储
-5. 调用转换服务（@firecrawl/anydoc 或 markitdown-ts）
+2. 上传到后端 `POST /api/files/upload`（附 `lessonId`，§3.2.3/§5.1.6）
+3. 后端二次校验文件类型白名单与大小（multer limits）
+4. 内存 Buffer 直转，**不落临时目录**（2026-10-15 实现拍板）
+5. 调用转换服务：**markitdown-ts**（本地，§12 事项 #3 拍板）
 6. 生成 Markdown 内容
-7. 返回给前端编辑器或直接保存到 Page
+7. 在指定 Lesson 下新建 Page（标题=文件名去扩展名）并返回，前端刷新树自动选中
 
 ### 10.3 转换服务选型建议
 
@@ -780,7 +797,7 @@ ALLOWED_EXTENSIONS="txt,md,pdf,html,xlsx,xls,doc,docx,csv,xml,epub,ppt"
 | @firecrawl/anydoc | 支持格式多（docx/xlsx/pptx/pdf/csv/epub 等） | 格式覆盖度优先 |
 | markitdown-ts | TypeScript 原生，轻量 | Node/TS 工程化优先 |
 
-> 注意：xml、xls、epub 等格式需要单独确认覆盖情况。
+> **选型拍板（2026-10-15）**：markitdown-ts。实测（真实 docx/pdf/md 样本）：docx/xlsx/pdf/html/xml/txt/md/csv 转换正常；xls/doc/ppt/epub 不支持；图片类需 LLM 视觉模型（不启用）。原「xml、xls、epub 需单独确认」事项已了结。
 
 ---
 
@@ -790,7 +807,7 @@ ALLOWED_EXTENSIONS="txt,md,pdf,html,xlsx,xls,doc,docx,csv,xml,epub,ppt"
 
 1. **用户认证**：是否需要用户登录、多用户、权限管理？还是先做单人私有部署？（Phase 3 已拍板：单人私有部署，鉴权仅预留骨架，见 §7 Phase 3 注记；完整方案 Phase 7 定）
 2. **AI Provider**：初期接入哪些 LLM 提供商？（2026-10-14 拍板：**OpenRouter**（OpenAI 兼容接口，经策略模式适配器接入）；具体启用模型清单由用户后续确认，数据源为 `AI_AVAILABLE_MODELS` env；其他 Provider 仅预留适配器接口）
-3. **文件转换**：是否允许调用外部服务？还是必须尽量本地 Node 完成？
+3. **文件转换**：是否允许调用外部服务？还是必须尽量本地 Node 完成？（2026-10-15 拍板：**本地 markitdown-ts**，不调外部服务；支持面实测见 §10.1）
 4. **外部同步源**：Sync 功能对接的外部 API 文档是否已就绪？接口格式如何？
 5. **历史版本回滚**：是否需要从 Release 快照回滚到某个历史版本？（2026-10-15 拍板：**需要**，采用「激活版本」模型——历史版本可切换为激活版本，AI 知识库与可编辑草稿同步变为该版本，覆盖草稿前二次确认；详见 §3.4.2/§3.4.3/§4.3.3）
 6. **AI 对话持久化**：对话记录是否需要长期保存？是否有数据保留策略？（2026-10-14 拍板：**不落库**；上次会话经浏览器 localStorage 持久化，New Chat 清空；无长期记忆需求，见 §4.3.2）

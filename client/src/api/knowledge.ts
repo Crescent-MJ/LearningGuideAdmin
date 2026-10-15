@@ -135,4 +135,29 @@ export const knowledgeApi = {
     http.post<SyncSummary>('/sync/structure', { externalId }).then((r) => r.data),
   syncAll: (externalId: string) =>
     http.post<SyncSummary>('/sync/all', { externalId }).then((r) => r.data),
+
+  // 文件上传（§5.1.6 / §3.2.3 / §10）：转换后在指定 Lesson 下新建 Page 并返回
+  uploadFile: (lessonId: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    form.append('lessonId', lessonId)
+    return http
+      .post<PageNode>('/files/upload', form, { timeout: 60000 }) // 大文件+本地转换放宽超时
+      .then((r) => r.data)
+  },
 }
+
+/** §10.1 上传白名单（与 server/src/files/files.service.ts ALLOWED_EXTENSIONS 保持一致） */
+export const UPLOAD_ALLOWED_EXTENSIONS = [
+  '.txt',
+  '.md',
+  '.csv',
+  '.pdf',
+  '.docx',
+  '.xlsx',
+  '.html',
+  '.xml',
+] as const
+
+/** §10.1 单文件大小上限 15MB */
+export const UPLOAD_MAX_FILE_SIZE = 15 * 1024 * 1024

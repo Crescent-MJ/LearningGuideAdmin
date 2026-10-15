@@ -9,6 +9,7 @@ import { LessonsModule } from './lessons/lessons.module';
 import { PagesModule } from './pages/pages.module';
 import { ReleasesModule } from './releases/releases.module';
 import { SyncModule } from './sync/sync.module';
+import { FilesModule } from './files/files.module';
 import { AiModule } from './ai/ai.module';
 import { validateEnv } from './config/env.validation';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
@@ -32,6 +33,8 @@ import { ApiKeyGuard } from './common/guards/api-key.guard';
     PagesModule,
     ReleasesModule,
     SyncModule,
+    // 文件上传转 Markdown（§3.2.3/§5.1.6/§10）
+    FilesModule,
     // AI Tutor 后端模块（§7 Phase 5、§5.2）
     AiModule,
   ],

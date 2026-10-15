@@ -26,15 +26,15 @@ interface KnowledgeState {
   expandedCourseIds: string[]
   selectedCourseId: string | null
   selectedPageId: string | null
+  /** 每个本地课程上次编辑的页面（§3.2.2：切换同步目标后自动回到上次编辑页） */
+  lastPageIdByCourse: Record<string, string>
   draft: PageDraft | null
   loading: boolean
 
   // 外部源同步（§3.2.2）
   externalCourses: ExternalCourseStatus[]
-  /** 选择器锁定的外部课程 externalId */
+  /** 当前同步目标（外部课程 externalId）；选中即切换，无锁定机制（2026-10-15 改） */
   selectedExternalId: string | null
-  /** 选择器是否锁定（解锁后才能更换目标） */
-  externalLocked: boolean
   syncing: boolean
 
   loadCourses: () => Promise<void>
@@ -54,10 +54,17 @@ interface KnowledgeState {
 
   // 同步动作
   loadExternalCourses: () => Promise<void>
-  selectExternal: (externalId: string) => void
-  unlockExternal: () => void
+  /** 切换同步目标：先落盘当前草稿，再切树（§3.2.2，无锁定机制） */
+  selectExternal: (externalId: string) => Promise<void>
   /** 执行同步并刷新相关树；返回摘要供 UI 提示 */
   runSync: (mode: 'structure' | 'all') => Promise<SyncSummary>
+
+  /** 上传文档建页（§3.2.3）：转换成功后刷新树并选中新页 */
+  uploadDocument: (
+    courseId: string,
+    lessonId: string,
+    file: File,
+  ) => Promise<void>
 
   /**
    * 切换激活版本后调用（§3.4.2）：后端已用快照重建整棵草稿树，
@@ -74,12 +81,12 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
   expandedCourseIds: [],
   selectedCourseId: null,
   selectedPageId: null,
+  lastPageIdByCourse: {},
   draft: null,
   loading: false,
 
   externalCourses: [],
   selectedExternalId: null,
-  externalLocked: false,
   syncing: false,
 
   async loadCourses() {
@@ -119,6 +126,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     set({
       selectedCourseId: courseId,
       selectedPageId: pageId,
+      lastPageIdByCourse: { ...get().lastPageIdByCourse, [courseId]: pageId },
       draft: {
         pageId,
         title: page.title,
@@ -176,12 +184,11 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     set({ externalCourses })
   },
 
-  selectExternal(externalId) {
-    set({ selectedExternalId: externalId, externalLocked: true })
-  },
-
-  unlockExternal() {
-    set({ externalLocked: false })
+  async selectExternal(externalId) {
+    if (get().selectedExternalId === externalId) return
+    // 切换前落盘当前草稿（§3.2.2）；编辑器清空，由 CourseTree 按目标课程恢复上次编辑页
+    await get().flushSave()
+    set({ selectedExternalId: externalId, selectedPageId: null, draft: null })
   },
 
   async runSync(mode) {
@@ -206,6 +213,12 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     } finally {
       set({ syncing: false })
     }
+  },
+
+  async uploadDocument(courseId, lessonId, file) {
+    const page = await knowledgeApi.uploadFile(lessonId, file)
+    await get().refreshDetail(courseId)
+    await get().selectPage(courseId, page.id)
   },
 
   async afterActivateRelease(courseId) {

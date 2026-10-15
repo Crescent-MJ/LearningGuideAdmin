@@ -8,12 +8,11 @@ import type { SyncSummary } from '../../api/knowledge'
  * - Sync Structure Only：仅同步目录树结构，新增页内容为空
  * - Sync Structure & Course：结构 + 内容全量同步
  * 非破坏性：外部变更不会覆盖本地，失效内容标记 STALE（树中置灰）。
- * 需先在侧栏顶部锁定同步目标（外部课程）。
+ * 同步目标为侧栏顶部下拉当前选中课程（2026-10-15 改：无锁定机制）。
  */
 export function SyncButtons() {
   const { message } = App.useApp()
   const selectedExternalId = useKnowledgeStore((s) => s.selectedExternalId)
-  const externalLocked = useKnowledgeStore((s) => s.externalLocked)
   const syncing = useKnowledgeStore((s) => s.syncing)
   const runSync = useKnowledgeStore((s) => s.runSync)
 
@@ -35,7 +34,7 @@ export function SyncButtons() {
     }
   }
 
-  const disabled = !selectedExternalId || !externalLocked
+  const disabled = !selectedExternalId
 
   return (
     <Space direction="vertical" style={{ width: '100%' }} size={4}>
@@ -59,7 +58,7 @@ export function SyncButtons() {
       </Button>
       {disabled && (
         <span style={{ fontSize: 12, color: '#999' }}>
-          请先在上方选择并锁定外部课程
+          请先在上方选择同步目标
         </span>
       )}
     </Space>

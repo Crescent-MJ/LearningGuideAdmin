@@ -5,3 +5,8 @@ body,
   height: 100%;
   margin: 0;
 }
+
+/* 课程树隐藏原生展开箭头（§3.2.1，2026-10-15 改：点击行展开，行尾 chevron 提示） */
+.course-tree-no-switcher .ant-tree-switcher {
+  visibility: hidden;
+}
