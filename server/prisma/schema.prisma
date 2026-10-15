@@ -29,6 +29,9 @@ model Course {
   description   String?
   externalId    String? // 对应外部同步源的 ID
   structureJson Json? // 存储树形目录的原始结构，用于快速渲染
+  // 激活版本指针（2026-10-15 拍板，开发文档 §3.4.3/§4.3.3）：AI Tutor 知识库读此
+  // Release 快照；普通标量列，不建 Prisma 外键关系（Release 删除场景由发布保护兜底）
+  currentReleaseId String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

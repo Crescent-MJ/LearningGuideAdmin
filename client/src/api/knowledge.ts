@@ -40,10 +40,14 @@ export interface ReleaseSummary {
   versionTag: string
   revisionNotes: string
   createdAt: string
+  /** 是否为该 Course 的激活版本（AI 知识库 + 草稿同步依据，§3.4.2） */
+  isActive: boolean
 }
 
-export interface ReleaseDetail extends ReleaseSummary {
+export interface ReleaseDetail extends Omit<ReleaseSummary, 'isActive'> {
   courseId: string
+  /** 后端 GET /releases/:id 与 publish 返回裸 Release 行，不带 isActive（§5.1.4） */
+  isActive?: boolean
   snapshotData: {
     lessons: Array<{
       id: string
@@ -116,6 +120,13 @@ export const knowledgeApi = {
     http.get<ReleaseSummary[]>(`/courses/${courseId}/releases`).then((r) => r.data),
   getRelease: (releaseId: string) =>
     http.get<ReleaseDetail>(`/releases/${releaseId}`).then((r) => r.data),
+  activateRelease: (courseId: string, releaseId: string) =>
+    http
+      .post<{ id: string; versionTag: string }>(
+        `/courses/${courseId}/activate-release`,
+        { releaseId },
+      )
+      .then((r) => r.data),
 
   // 同步（§5.1.5 / §3.2.2 外部源接管模型）
   listExternalCourses: () =>

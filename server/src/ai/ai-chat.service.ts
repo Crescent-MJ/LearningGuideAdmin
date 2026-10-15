@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiConfigService } from './ai-config.service';
 import { ChatStreamDto } from './dto/chat-stream.dto';
@@ -33,14 +37,14 @@ export class AiChatService {
 
     const course = await this.prisma.course.findUnique({
       where: { id: dto.courseId },
-      select: { id: true, title: true },
+      select: { id: true, title: true, currentReleaseId: true },
     });
     if (!course) throw new NotFoundException('课程不存在');
 
     const [runtime, prompts, context] = await Promise.all([
       this.configs.resolveRuntime(dto.courseId),
       this.configs.resolvePrompts(dto.courseId, dto.mode),
-      this.buildContext(dto.courseId),
+      this.buildContext(course.currentReleaseId),
     ]);
 
     const systemParts = [prompts.systemPrompt];
@@ -85,25 +89,40 @@ export class AiChatService {
   }
 
   /**
-   * 知识库上下文聚合（§4.4.2 第 3 步）：仅取 SYNCED 的 Lesson/Page——
-   * STALE 节点不作为 AI Tutor 知识库（§3.2.2 拍板）。
+   * 知识库上下文聚合（§4.4.2 第 3 步，2026-10-15 拍板改 §4.3.3）：
+   * 读 Course.currentReleaseId 指向的激活 Release 快照，不再读实时草稿——
+   * Publish 后未再次发布的编辑不影响 AI。快照本身已在发布时过滤 STALE 节点
+   * （§3.4.3），此处无需再过滤。未发布过的课程直接报错交用户在 Knowledge 发布。
    */
-  private async buildContext(courseId: string): Promise<string> {
-    const lessons = await this.prisma.lesson.findMany({
-      where: { courseId, syncState: 'SYNCED' },
-      orderBy: { sortOrder: 'asc' },
-      include: {
-        pages: {
-          where: { syncState: 'SYNCED' },
-          orderBy: { sortOrder: 'asc' },
-        },
-      },
+  private async buildContext(
+    currentReleaseId: string | null,
+  ): Promise<string> {
+    if (!currentReleaseId) {
+      throw new BadRequestException(
+        '该课程尚未发布知识库版本，请先在 Knowledge 模块 Publish',
+      );
+    }
+    const release = await this.prisma.release.findUnique({
+      where: { id: currentReleaseId },
+      select: { snapshotData: true },
     });
+    if (!release) {
+      throw new BadRequestException(
+        '该课程尚未发布知识库版本，请先在 Knowledge 模块 Publish',
+      );
+    }
+    const snapshot = release.snapshotData as unknown as {
+      lessons?: {
+        title: string;
+        pages?: { title: string; contentMd?: string }[];
+      }[];
+    };
     const blocks: string[] = [];
-    for (const lesson of lessons) {
-      for (const page of lesson.pages) {
-        if (!page.contentMd.trim()) continue;
-        blocks.push(`## ${lesson.title} / ${page.title}\n${page.contentMd}`);
+    for (const lesson of snapshot?.lessons ?? []) {
+      for (const page of lesson.pages ?? []) {
+        const content = page.contentMd?.trim();
+        if (!content) continue;
+        blocks.push(`## ${lesson.title} / ${page.title}\n${content}`);
       }
     }
     return blocks.join('\n\n');

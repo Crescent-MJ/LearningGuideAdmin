@@ -58,6 +58,12 @@ interface KnowledgeState {
   unlockExternal: () => void
   /** 执行同步并刷新相关树；返回摘要供 UI 提示 */
   runSync: (mode: 'structure' | 'all') => Promise<SyncSummary>
+
+  /**
+   * 切换激活版本后调用（§3.4.2）：后端已用快照重建整棵草稿树，
+   * 本地待保存的防抖草稿必须丢弃（否则旧内容会把已覆盖的树写回去）。
+   */
+  afterActivateRelease: (courseId: string) => Promise<void>
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -200,6 +206,15 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     } finally {
       set({ syncing: false })
     }
+  },
+
+  async afterActivateRelease(courseId) {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer)
+      debounceTimer = null
+    }
+    set({ draft: null, selectedPageId: null })
+    await get().refreshDetail(courseId)
   },
 
   async deleteCourse(id) {

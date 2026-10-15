@@ -175,12 +175,13 @@ describe('Knowledge API (e2e)', () => {
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('GET /api/courses/:id/releases 历史列表不含 snapshotData', async () => {
+  it('GET /api/courses/:id/releases 历史列表不含 snapshotData，激活版本标注 isActive', async () => {
     const res = await request(app.getHttpServer())
       .get(`/api/courses/${courseId}/releases`)
       .expect(200);
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].snapshotData).toBeUndefined();
+    expect(res.body.data[0].isActive).toBe(true); // 发布即激活（§3.4.3）
   });
 
   it('GET /api/releases/:releaseId 快照详情', async () => {
@@ -189,6 +190,52 @@ describe('Knowledge API (e2e)', () => {
       .expect(200);
     expect(res.body.data.revisionNotes).toBe('e2e 首发');
     expect(res.body.data.snapshotData.lessons).toBeDefined();
+  });
+
+  it('POST /api/courses/:id/activate-release 切换历史版本并重建草稿树（§3.4.2）', async () => {
+    // 先做一版新修改并发布 v2
+    await request(app.getHttpServer())
+      .put(`/api/pages/${pageId}`)
+      .send({ contentMd: '# v2 草稿内容' })
+      .expect(200);
+    const v2 = await request(app.getHttpServer())
+      .post(`/api/courses/${courseId}/release`)
+      .send({ revisionNotes: 'e2e 二发' })
+      .expect(201);
+
+    // 切回 v1：草稿树应重建为 v1 内容，激活指针回到 v1
+    const act = await request(app.getHttpServer())
+      .post(`/api/courses/${courseId}/activate-release`)
+      .send({ releaseId })
+      .expect(201);
+    expect(act.body.data.id).toBe(releaseId);
+
+    const detail = await request(app.getHttpServer())
+      .get(`/api/courses/${courseId}`)
+      .expect(200);
+    const pages = detail.body.data.lessons.flatMap((l: { pages: unknown[] }) => l.pages);
+    expect(pages).toHaveLength(1);
+    expect(pages[0].contentMd).toBe('# 更新'); // v1 快照内容覆盖草稿
+    expect(pages[0].syncState).toBe('SYNCED');
+    // 树已重建（新 ID），回写供后续 DELETE 用例使用
+    lessonId = detail.body.data.lessons[0].id as string;
+    pageId = pages[0].id as string;
+
+    const list = await request(app.getHttpServer())
+      .get(`/api/courses/${courseId}/releases`)
+      .expect(200);
+    expect(list.body.data.find((r: { id: string }) => r.id === releaseId).isActive).toBe(true);
+    expect(
+      list.body.data.find((r: { id: string }) => r.id === v2.body.data.id).isActive,
+    ).toBe(false);
+  });
+
+  it('POST /api/courses/:id/activate-release releaseId 不属于该课程应 404', async () => {
+    const res = await request(app.getHttpServer())
+      .post(`/api/courses/${courseId}/activate-release`)
+      .send({ releaseId: '00000000-0000-0000-0000-000000000000' })
+      .expect(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
   it('DELETE /api/courses/:id 存在 Release 应 409 CONFLICT（删除保护）', async () => {

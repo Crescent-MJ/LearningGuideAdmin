@@ -66,6 +66,13 @@ describe('AI API (e2e)', () => {
       },
     });
     courseId = course.id;
+
+    // 2026-10-15 激活版本模型（§4.3.3）：chat-stream 知识源读激活 Release，
+    // 夹具课程须先发布（发布即激活；快照仅含 SYNCED 节点，STALE 被排除在发布之外）
+    await request(app.getHttpServer())
+      .post(`/api/courses/${courseId}/release`)
+      .send({ revisionNotes: 'e2e 初始发布' })
+      .expect(201);
   });
 
   afterAll(async () => {
@@ -76,6 +83,7 @@ describe('AI API (e2e)', () => {
     const ids = courses.map((c) => c.id);
     if (ids.length > 0) {
       await prisma.courseAiConfig.deleteMany({ where: { courseId: { in: ids } } });
+      await prisma.release.deleteMany({ where: { courseId: { in: ids } } }); // Release 无级联，先删
       await prisma.course.deleteMany({ where: { id: { in: ids } } });
     }
     await app.close();
@@ -145,8 +153,29 @@ describe('AI API (e2e)', () => {
     expect(system).toContain('CUSTOM-PROMPT'); // 自定义优先于模板
     expect(system).toContain('苏格拉底式的引导者');
     expect(system).toContain('SYNCED-CONTENT');
-    expect(system).not.toContain('STALE-CONTENT-SHOULD-BE-EXCLUDED'); // §3.2.2 STALE 不作知识库
+    expect(system).not.toContain('STALE-CONTENT-SHOULD-BE-EXCLUDED'); // §3.4.3 快照仅含 SYNCED
     expect(lastOpts!.apiKey).toBe('sk-plain-secret'); // 课程级解密值
+  });
+
+  it('POST /api/ai/chat-stream 课程未发布知识库版本应 400（§4.3.3 激活版本模型）', async () => {
+    const unpublished = await prisma.course.create({
+      data: {
+        title: 'AI-E2E未发布课',
+        lessons: {
+          create: {
+            title: '章',
+            sortOrder: 0,
+            pages: { create: [{ title: '页', contentMd: 'DRAFT-ONLY', sortOrder: 0 }] },
+          },
+        },
+      },
+    });
+    const res = await request(app.getHttpServer())
+      .post('/api/ai/chat-stream')
+      .send({ courseId: unpublished.id, message: 'hi', mode: 'LECTURE' })
+      .expect(400);
+    expect(res.body.error.message).toContain('Publish');
+    await prisma.course.delete({ where: { id: unpublished.id } });
   });
 
   it('POST /api/ai/chat-stream 携带 history 时拼入多轮上下文（§4.4.1）', async () => {
@@ -197,6 +226,11 @@ describe('AI API (e2e)', () => {
         apiKey: 'sk-rl-test',
       })
       .expect(200);
+    // 限流在知识源校验之前触发（streamChat 第 1 步），但为保持"前 10 次可达链路"语义，先发布空快照
+    await request(app.getHttpServer())
+      .post(`/api/courses/${rlCourse.id}/release`)
+      .send({ revisionNotes: 'e2e 限流课发布' })
+      .expect(201);
     let lastStatus = 0;
     for (let i = 0; i < 11; i++) {
       const res = await request(app.getHttpServer())
@@ -206,6 +240,7 @@ describe('AI API (e2e)', () => {
     }
     expect(lastStatus).toBe(429);
     await prisma.courseAiConfig.deleteMany({ where: { courseId: rlCourse.id } });
+    await prisma.release.deleteMany({ where: { courseId: rlCourse.id } });
     await prisma.course.delete({ where: { id: rlCourse.id } });
   });
 

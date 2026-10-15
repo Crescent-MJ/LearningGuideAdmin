@@ -69,6 +69,8 @@ model Course {
   description     String?
   externalId      String?   // 对应外部同步源的 ID
   structureJson   Json?     // 存储树形目录的原始结构，用于快速渲染
+  currentReleaseId String?  // 激活版本指针（2026-10-15 拍板，§3.4.3/§4.3.3）：AI Tutor 知识库
+                             // 即读此 Release 快照；为普通标量列，不建 Prisma 外键关系
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -283,26 +285,35 @@ Knowledge System 是系统的主界面，采用左右两栏布局：
 | 列名 | 说明 |
 |------|------|
 | Course Name | 课程名称 |
-| Revision Notes | 最近一次发布的备注（若无则显示 "No revision notes provided"） |
-| Current Version | 版本号，格式 `CourseName_YYYYMMDDHHmmss`，可点击 |
+| Revision Notes | **激活版本**的备注（2026-10-15 随激活模型改拍，原「最近一次发布的备注」；若无则显示 "No revision notes provided"） |
+| Current Version | **激活版本**版本号（`Course.currentReleaseId` 指向的 Release），格式 `CourseName_YYYYMMDDHHmmss`，可点击 |
 | Action | Publish 按钮 |
 
 #### 3.4.2 Current Version 交互
 
+> **设计改拍（2026-10-15，用户裁决）**：原「只读查看、无回滚」改为**激活版本模型**——历史版本可浏览、可切换为激活版本。
+
 - 点击版本号，弹出 Dropdown/Modal 展示该 Course 的历史版本列表
-- 每个历史版本显示：版本号、发布时间、Revision Notes
-- 暂不需要回滚功能，只需查看
+- 每个历史版本显示：版本号、发布时间、Revision Notes；**当前激活版本带「激活中」标识**
+- 每个非激活的历史版本提供「切换到此版本」按钮（§12 事项 #5 拍板）：
+  1. 二次确认弹窗：明确提示「切换将以该版本内容**覆盖当前可编辑草稿**（含未发布的修改），且 AI Tutor 知识库立即变为该版本」，用户确认后才执行
+  2. 前端调用 `POST /api/courses/:id/activate-release`，传入 `{ releaseId }`
+  3. 后端在**单事务**内：校验 releaseId 属于该 Course → 更新 `Course.currentReleaseId` → 用该 Release 的 snapshotData **重建 Lesson/Page 草稿树**（快照中仅含发布时刻的 SYNCED 节点，重建节点一律 `syncState=SYNCED`，后续 Sync 按标题匹配不受影响）
+  4. 前端刷新课程树与编辑器（当前草稿指向的页面可能已不存在，需清空选中态）
 
 #### 3.4.3 Publish 流程
+
+> **设计改拍（2026-10-15）**：Publish 语义 = 创建快照 + **激活**（发布即激活）；快照仅收录 `syncState=SYNCED` 的节点（延续 §3.2.2「STALE 不作 AI 知识库」）。
 
 1. 用户点击某个 Course 的 "Publish" 按钮
 2. 弹出 Modal，要求填写 Revision Notes（必填）
 3. 确认后，前端调用 `POST /api/courses/:id/release` 接口，传入 revisionNotes
-4. 后端执行以下逻辑：
-   - 读取当前 Course 下所有 Lessons 及其对应的 Pages
+4. 后端在**单事务**内执行以下逻辑：
+   - 读取当前 Course 下所有 Lessons 及其对应的 Pages（**过滤 STALE 节点**）
    - 生成版本号：`CourseTitle_YYYYMMDDHHmmss`
    - 将所有当前内容聚合为 JSON 快照
    - 写入 Release 表
+   - 更新 `Course.currentReleaseId` = 新 Release（发布即激活；此刻草稿与快照内容一致，无需重建树）
 5. 前端刷新 Publish 列表
 
 > **重要**：Publish 动作是发布整个 Course 下所有页面的快照，不是单个 Page。
@@ -368,7 +379,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
    - message（用户输入）
    - mode（当前模式：lecture 或 socratic）
 3. 后端执行以下逻辑：
-   - 根据 courseId 从数据库提取该 Course 下所有 Page 的 Markdown 内容
+   - 知识库上下文来源（**2026-10-15 拍板改**）：读取 `Course.currentReleaseId` 指向的激活 Release 的 snapshotData 聚合课程资料，**不再读实时草稿**——Publish 后未再次发布的编辑不影响 AI；若课程从未发布（currentReleaseId 为空），返回错误提示「该课程尚未发布知识库版本，请先在 Knowledge 模块 Publish」
    - 组装 Prompt：`System Prompt + [CONTEXT: 课程资料] + 用户消息`
    - 调用 LLM API（流式）
    - 将流式响应转发给前端
@@ -465,9 +476,10 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /api/courses/:id/release | 发布 Course 快照（需 revisionNotes） |
-| GET | /api/courses/:id/releases | 获取 Course 的所有 Release 历史 |
+| POST | /api/courses/:id/release | 发布 Course 快照并**激活**（需 revisionNotes；快照仅含 SYNCED 节点；2026-10-15 改） |
+| GET | /api/courses/:id/releases | 获取 Course 的所有 Release 历史（含 `isActive` 标识，2026-10-15 加） |
 | GET | /api/releases/:releaseId | 获取某个 Release 的快照详情 |
+| POST | /api/courses/:id/activate-release | 切换激活版本：`{ releaseId }`；事务内更新 currentReleaseId 并以该快照重建草稿树（2026-10-15 新增，§3.4.2） |
 
 #### 5.1.5 同步接口
 
@@ -780,7 +792,7 @@ ALLOWED_EXTENSIONS="txt,md,pdf,html,xlsx,xls,doc,docx,csv,xml,epub,ppt"
 2. **AI Provider**：初期接入哪些 LLM 提供商？（2026-10-14 拍板：**OpenRouter**（OpenAI 兼容接口，经策略模式适配器接入）；具体启用模型清单由用户后续确认，数据源为 `AI_AVAILABLE_MODELS` env；其他 Provider 仅预留适配器接口）
 3. **文件转换**：是否允许调用外部服务？还是必须尽量本地 Node 完成？
 4. **外部同步源**：Sync 功能对接的外部 API 文档是否已就绪？接口格式如何？
-5. **历史版本回滚**：是否需要从 Release 快照回滚到某个历史版本？
+5. **历史版本回滚**：是否需要从 Release 快照回滚到某个历史版本？（2026-10-15 拍板：**需要**，采用「激活版本」模型——历史版本可切换为激活版本，AI 知识库与可编辑草稿同步变为该版本，覆盖草稿前二次确认；详见 §3.4.2/§3.4.3/§4.3.3）
 6. **AI 对话持久化**：对话记录是否需要长期保存？是否有数据保留策略？（2026-10-14 拍板：**不落库**；上次会话经浏览器 localStorage 持久化，New Chat 清空；无长期记忆需求，见 §4.3.2）
 7. **前端框架最终选定**：React + Vite 还是 Next.js？
 8. **部署环境**：生产环境部署在何处？（云服务器、Vercel + Railway 等）

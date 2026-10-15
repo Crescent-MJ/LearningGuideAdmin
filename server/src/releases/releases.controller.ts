@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Post } from '@nestjs/common';
 import { ReleasesService } from './releases.service';
 import { CreateReleaseDto } from './dto/create-release.dto';
+import { ActivateReleaseDto } from './dto/activate-release.dto';
 
 /**
  * §5.1.4 发布与版本。
@@ -13,6 +14,11 @@ export class ReleasesController {
   @Post('courses/:id/release')
   publish(@Param('id') id: string, @Body() dto: CreateReleaseDto) {
     return this.releasesService.publish(id, dto);
+  }
+
+  @Post('courses/:id/activate-release')
+  activate(@Param('id') id: string, @Body() dto: ActivateReleaseDto) {
+    return this.releasesService.activate(id, dto);
   }
 
   @Get('courses/:id/releases')

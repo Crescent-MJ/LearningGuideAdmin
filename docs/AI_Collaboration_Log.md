@@ -5,6 +5,28 @@
 
 ---
 
+## 2026-10-15 ｜ 细节调整：Publish 激活版本模型（历史版本可切换 + AI 知识源改读快照）
+
+- **任务**：用户手动冒烟 Phase 4/5/6 后反馈 Knowledge 流程差距（4 点梳理），本轮实现其中第 4 点：Publish = ①浏览历史并切换 ②发布后 AI Tutor 以该版为知识库、草稿同步变为该版可编辑版
+- **用户拍板**：
+  - ① AI Tutor 知识源=**读激活 Release 快照**（不再读实时草稿；未发布课程 chat-stream 报 400 提示先 Publish）
+  - ② 切换历史版本=**覆盖草稿**（二次确认弹窗明示不可撤销）
+  - ③ 外部源音视频数据**本轮不处理**（留 §12 事项 #4 真实 API 接入时一并设计）
+  - ④ Publish 表格 Revision Notes 列语义=**激活版本的备注**（Review 设计偏差上报，用户裁决改文档不改实现）
+  - ⑤ 协作规则（长期有效）：每次大迭代完成后**先询问用户**是否推送新分支用于合并；`.env` 缺失 4 项（PORT/NODE_ENV/AUTH_ENABLED/AUTH_TOKEN）不补全，依赖代码默认值；OPENROUTER_API_KEY 由用户自行填写，AI 不经手密钥值
+  - ⑥ AI_AVAILABLE_MODELS 改为仅 `deepseek/deepseek-v4.1-flash`（经 OpenRouter /models 公开接口核查 462 模型确认存在；不加 AI_MOCK 开关，key 留空即天然安全验证态）
+- **变更清单**：
+  - **设计文档先行同步**：§2 Course 增 `currentReleaseId String?`（普通标量列不建外键）；§3.4.1 列语义；§3.4.2 历史版本可切换（激活中标识+二次确认+事务重建草稿树）；§3.4.3 发布即激活、快照仅含 SYNCED 节点；§4.3.3 AI 知识源改读激活快照；§5.1.4 增 `POST /api/courses/:id/activate-release`、releases 列表带 isActive；§12 事项 #5 标记已拍板
+  - **Schema/迁移**：`20261015030120_add_course_current_release_id`（ALTER TABLE 可空列）
+  - **后端**：`releases.service.ts` publish 单事务（读取→快照→激活指针，Review Blocking 修复项）、新增 activate（事务内 deleteMany+按快照重建 Lesson/Page、一律 SYNCED、更新指针、归属校验 404）、findAllByCourse 标注 isActive；`releases.controller.ts` 新路由；`dto/activate-release.dto.ts`；`ai-chat.service.ts` buildContext 改读激活快照（未发布 400）
+  - **前端**：`api/knowledge.ts`（ReleaseSummary.isActive、ReleaseDetail 改 Omit+可选、activateRelease 封装）；`knowledgeStore.ts` 新增 afterActivateRelease（清防抖定时器+丢弃草稿+刷新树，防旧草稿写回已覆盖的树）；`PublishPanel.tsx`（Current Version/Revision Notes 列改按激活版本渲染、历史 Modal「激活中」绿标+「切换到此版本」danger 二次确认）
+- **自测证据**：server `tsc --noEmit` 0 错误；单测 8 套件 **30/30**（含发布即激活、事务内 SYNCED 过滤断言、activate 重建/归属 404、isActive 标注）；e2e 3 套件 **38/38**（新增 activate 端到端切版本重建草稿树+新 ID 回写、未发布课程 400、限流夹具前置发布；ai 夹具 afterAll 补删 Release 防外键）；空库重放：临时库 `migrate deploy` 3 迁移全部成功（验证后已删）；client `tsc -b` 0 错误。冒烟按新口径由用户手动执行
+- **审查结论**：Review Agent 独立审查首轮 **REQUEST_CHANGES**（1 Blocking：publish 快照读取在事务外，违反 §3.4.3「单事务」；修复移入 $transaction 后复审 **APPROVE**）。Non-blocking 处置：#2 ReleaseDetail.isActive 类型已修、#3 §3.4.1 措辞经用户裁决已修；留档后续：#4 activate N+1 可改 createMany、#5 边界用例补充（空 releaseId 400/courseId 404/全 STALE 空快照）、#6 悬空指针 400 提示语义；已知限制：快照不含 duration，切换版本后章节时长丢失（当前无功能消费，若启用先改文档 §2 快照结构）
+- **Git**：未推送（待用户裁决是否建分支/PR，见下）
+- **下一步**：用户重启后端后手动冒烟（发布→编辑→切历史版本→AI 对话验证知识源为激活版）→ 反馈修复 → Phase 7 剩余项
+
+---
+
 ## 2026-10-14 ｜ Phase 4/5/6 完成：Knowledge UI + 外部同步重设计 + AI Tutor 前后端
 
 - **任务**：开发文档 §7 Phase 4（Knowledge System 前端）、Phase 5（AI Tutor 后端）、Phase 6（AI Tutor 前端），用户指示一次性完成 5/6
