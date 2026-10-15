@@ -8,7 +8,7 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { MAX_FILE_SIZE } from '../src/files/files.service';
 
 /**
- * 文件上传 e2e（开发文档 §5.1.6、§3.2.3、§10）。
+ * 文档转换 e2e（开发文档 §5.1.6、§3.2.3 两步弹窗流程）。
  * 自建课程/章节夹具，afterAll 经 Prisma 清理；真实调用 markitdown-ts 本地转换（md 直通）。
  */
 describe('Files API (e2e)', () => {
@@ -51,10 +51,10 @@ describe('Files API (e2e)', () => {
     await app.close();
   });
 
-  it('POST /api/files/upload 上传 md 应在章节下建页（标题=文件名去扩展名，§3.2.3）', async () => {
+  it('POST /api/files/convert 上传 md 应返回 title+markdown 且不建页（§5.1.6）', async () => {
+    const before = await prisma.page.count({ where: { lessonId } });
     const res = await request(app.getHttpServer())
-      .post('/api/files/upload')
-      .field('lessonId', lessonId)
+      .post('/api/files/convert')
       .attach(
         'file',
         Buffer.from('# 极限与连续\n\n$\\lim_{x\\to 0}\\frac{\\sin x}{x}=1$', 'utf8'),
@@ -63,61 +63,51 @@ describe('Files API (e2e)', () => {
       .expect(201);
     expect(res.body.success).toBe(true);
     expect(res.body.data.title).toBe('上传笔记');
-    expect(res.body.data.contentMd).toContain('极限与连续');
-    expect(res.body.data.syncState).toBe('SYNCED');
-    // 落库校验：页面归属该 Lesson
-    const page = await prisma.page.findUnique({ where: { id: res.body.data.id } });
+    expect(res.body.data.markdown).toContain('极限与连续');
+    // 转换阶段绝不建页
+    expect(await prisma.page.count({ where: { lessonId } })).toBe(before);
+  });
+
+  it('完整两步流程：convert 预览 → Import 经 §5.1.3 建页并落库', async () => {
+    const conv = await request(app.getHttpServer())
+      .post('/api/files/convert')
+      .attach('file', Buffer.from('# Import 测试\n\n内容', 'utf8'), {
+        filename: 'import-doc.md',
+        contentType: 'text/markdown',
+      })
+      .expect(201);
+    const created = await request(app.getHttpServer())
+      .post(`/api/lessons/${lessonId}/pages`)
+      .send({ title: conv.body.data.title, contentMd: conv.body.data.markdown })
+      .expect(201);
+    expect(created.body.data.title).toBe('import-doc');
+    expect(created.body.data.syncState).toBe('SYNCED');
+    const page = await prisma.page.findUnique({
+      where: { id: created.body.data.id },
+    });
     expect(page?.lessonId).toBe(lessonId);
+    expect(page?.contentMd).toContain('Import 测试');
   });
 
   it('上传白名单外扩展名（.exe）应 400 且提示支持格式（§10.1）', async () => {
     const res = await request(app.getHttpServer())
-      .post('/api/files/upload')
-      .field('lessonId', lessonId)
+      .post('/api/files/convert')
       .attach('file', Buffer.from('MZ\x90\x00binary'), { filename: 'virus.exe' })
       .expect(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
     expect(res.body.error.message).toContain('格式暂不支持');
   });
 
-  it('缺少 lessonId 字段应 400 VALIDATION_ERROR（§9.3）', async () => {
-    const res = await request(app.getHttpServer())
-      .post('/api/files/upload')
-      .attach('file', Buffer.from('# x', 'utf8'), { filename: 'a.md' })
-      .expect(400);
-    expect(res.body.error.code).toBe('VALIDATION_ERROR');
-  });
-
-  it('lessonId 非法 UUID 应 400（DTO @IsUUID）', async () => {
-    const res = await request(app.getHttpServer())
-      .post('/api/files/upload')
-      .field('lessonId', 'not-a-uuid')
-      .attach('file', Buffer.from('# x', 'utf8'), { filename: 'a.md' })
-      .expect(400);
-    expect(res.body.error.code).toBe('VALIDATION_ERROR');
-  });
-
-  it('lessonId 不存在应 404 NOT_FOUND', async () => {
-    const res = await request(app.getHttpServer())
-      .post('/api/files/upload')
-      .field('lessonId', '00000000-0000-0000-0000-000000000000')
-      .attach('file', Buffer.from('# x', 'utf8'), { filename: 'a.md' })
-      .expect(404);
-    expect(res.body.error.code).toBe('NOT_FOUND');
-  });
-
   it('未附带 file 字段应 400', async () => {
     const res = await request(app.getHttpServer())
-      .post('/api/files/upload')
-      .field('lessonId', lessonId)
+      .post('/api/files/convert')
       .expect(400);
     expect(res.body.error.message).toContain('未选择文件');
   });
 
-  it('超过 15MB 应 400（multer LIMIT_FILE_SIZE 映射，§10.1）', async () => {
+  it('超过 15MB 应 400（multer 超限经 413 映射，§10.1）', async () => {
     const res = await request(app.getHttpServer())
-      .post('/api/files/upload')
-      .field('lessonId', lessonId)
+      .post('/api/files/convert')
       .attach('file', Buffer.alloc(MAX_FILE_SIZE + 1, 0x41), {
         filename: 'big.md',
         contentType: 'text/markdown',
@@ -129,8 +119,7 @@ describe('Files API (e2e)', () => {
 
   it('错误信封不泄露堆栈/内部路径（§9）', async () => {
     const res = await request(app.getHttpServer())
-      .post('/api/files/upload')
-      .field('lessonId', lessonId)
+      .post('/api/files/convert')
       .attach('file', Buffer.from('garbage'), { filename: 'x.pdf' })
       .expect(400);
     const text = JSON.stringify(res.body);

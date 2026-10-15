@@ -6,7 +6,12 @@ body,
   margin: 0;
 }
 
-/* 课程树隐藏原生展开箭头（§3.2.1，2026-10-15 改：点击行展开，行尾 chevron 提示） */
+/* 课程树隐藏原生展开箭头（§3.2.1，2026-10-15 改：display:none 不占位，课程名顶左；
+   点击行展开、行尾 chevron 提示；层级缩进收紧为 16px） */
 .course-tree-no-switcher .ant-tree-switcher {
-  visibility: hidden;
+  display: none;
+}
+
+.course-tree-no-switcher .ant-tree-indent-unit {
+  width: 16px;
 }

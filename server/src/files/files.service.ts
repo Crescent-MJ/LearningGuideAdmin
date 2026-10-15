@@ -4,7 +4,6 @@ import {
   Logger,
 } from '@nestjs/common';
 import { MarkItDown } from 'markitdown-ts';
-import { PagesService } from '../pages/pages.service';
 
 /** §10.1 白名单（2026-10-15 按 markitdown-ts 实测支持面拍板；xls/doc/ppt/epub 不支持） */
 export const ALLOWED_EXTENSIONS = [
@@ -21,20 +20,23 @@ export const ALLOWED_EXTENSIONS = [
 /** §10.1 单文件大小上限 15MB */
 export const MAX_FILE_SIZE = 15 * 1024 * 1024;
 
-/** 文件上传转 Markdown 建页（开发文档 §3.2.3、§5.1.6、§10） */
+export interface ConvertedDocument {
+  /** 文件名去扩展名（作新页标题） */
+  title: string;
+  markdown: string;
+}
+
+/** 文档转换（开发文档 §3.2.3、§5.1.6、§10）：仅转换不建页，建页由前端 Import 经 §5.1.3 完成 */
 @Injectable()
 export class FilesService {
   private readonly logger = new Logger(FilesService.name);
   private readonly markitdown = new MarkItDown();
 
-  constructor(private readonly pagesService: PagesService) {}
-
   /**
    * 校验上传文件 → markitdown-ts 本地转换（内存 Buffer，不落盘）→
-   * 在指定 Lesson 下新建 Page（标题=文件名去扩展名）。
-   * lessonId 不存在由 PagesService 抛 404。
+   * 返回 { title, markdown } 供弹窗预览（2026-10-15 两步流程改拍）。
    */
-  async uploadAndCreatePage(file: Express.Multer.File | undefined, lessonId: string) {
+  async convertFile(file: Express.Multer.File | undefined): Promise<ConvertedDocument> {
     if (!file || !file.buffer?.length) {
       throw new BadRequestException('未选择文件（multipart 字段名须为 file）');
     }
@@ -68,7 +70,7 @@ export class FilesService {
 
     const title =
       originalName.slice(0, -ext.length || undefined).trim() || '未命名页面';
-    return this.pagesService.create(lessonId, { title, contentMd: markdown });
+    return { title, markdown };
   }
 
   /**

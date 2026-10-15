@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { App, Dropdown, Tree, Modal, Input, Tooltip, Empty } from 'antd'
 import type { TreeDataNode } from 'antd'
 import {
@@ -9,16 +9,17 @@ import {
   RightOutlined,
 } from '@ant-design/icons'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
-import { UPLOAD_ALLOWED_EXTENSIONS, UPLOAD_MAX_FILE_SIZE } from '../../api/knowledge'
+import { UploadDocumentModal } from './UploadDocumentModal'
 
 /**
  * 三级课程目录树（§3.2.1；2026-10-15 改）：Course → Lesson → Page。
  * - 树按同步目标过滤：只显示当前目标对应的本地课程；未同步显示空态提示
- * - 隐藏原生展开箭头，点击课程行展开/收起（行尾 chevron 作提示）
+ * - 隐藏原生展开箭头（display:none 不占位，课程名顶左），点击课程行展开/收起
+ *   （行尾 chevron 作提示）；图标在行内自绘，避免与标题换行错位
  * - 切换目标后自动恢复该课程上次编辑的页面（§3.2.2）
  * - Page 节点点击选中 → 右侧编辑器加载
  * - keyword 按页面标题过滤树节点
- * - 节点悬停菜单：新建章节/页面、删除、上传文档建页（§3.2.3）
+ * - 节点悬停菜单：新建章节/页面、删除、上传文档建页（§3.2.3 两步弹窗）
  */
 export function CourseTree({ keyword }: { keyword: string }) {
   const { message, modal } = App.useApp()
@@ -35,7 +36,6 @@ export function CourseTree({ keyword }: { keyword: string }) {
   const deleteCourse = useKnowledgeStore((s) => s.deleteCourse)
   const deleteLesson = useKnowledgeStore((s) => s.deleteLesson)
   const deletePage = useKnowledgeStore((s) => s.deletePage)
-  const uploadDocument = useKnowledgeStore((s) => s.uploadDocument)
 
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([])
   const [inputState, setInputState] = useState<{
@@ -44,9 +44,11 @@ export function CourseTree({ keyword }: { keyword: string }) {
     lessonId?: string
   } | null>(null)
   const [inputValue, setInputValue] = useState('')
-  const [uploading, setUploading] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const uploadTargetRef = useRef<{ courseId: string; lessonId: string } | null>(null)
+  const [uploadTarget, setUploadTarget] = useState<{
+    courseId: string
+    lessonId: string
+    lessonTitle: string
+  } | null>(null)
 
   /** 当前同步目标对应的本地课程（§3.2.1 树过滤依据） */
   const visibleCourseId = useMemo(() => {
@@ -93,7 +95,6 @@ export function CourseTree({ keyword }: { keyword: string }) {
               .map((p) => ({
                 key: `page:${course.id}:${p.id}`,
                 title: p.title,
-                icon: <FileTextOutlined />,
                 isLeaf: true,
                 _stale: p.syncState === 'STALE',
                 _ops: { courseId: course.id, pageId: p.id } as const,
@@ -102,7 +103,6 @@ export function CourseTree({ keyword }: { keyword: string }) {
             return {
               key: `lesson:${course.id}:${lesson.id}`,
               title: lesson.title,
-              icon: <FolderOutlined />,
               children: pages,
               _stale: lesson.syncState === 'STALE',
               _ops: { courseId: course.id, lessonId: lesson.id } as const,
@@ -113,7 +113,6 @@ export function CourseTree({ keyword }: { keyword: string }) {
         return {
           key: `course:${course.id}`,
           title: course.title,
-          icon: <BookOutlined />,
           selectable: false,
           children: lessons,
           _ops: { courseId: course.id } as const,
@@ -202,35 +201,13 @@ export function CourseTree({ keyword }: { keyword: string }) {
     })
   }
 
-  /** 上传文档建页（§3.2.3）：前端预校验 → store.uploadDocument */
-  const startUpload = (courseId: string, lessonId: string) => {
-    uploadTargetRef.current = { courseId, lessonId }
-    fileInputRef.current?.click()
-  }
-
-  const onFileChosen = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = '' // 允许重复选同一文件
-    const target = uploadTargetRef.current
-    if (!file || !target) return
-    const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
-    if (!(UPLOAD_ALLOWED_EXTENSIONS as readonly string[]).includes(ext)) {
-      message.error(`格式暂不支持：${ext}（支持 ${UPLOAD_ALLOWED_EXTENSIONS.join(' / ')}）`)
-      return
-    }
-    if (file.size > UPLOAD_MAX_FILE_SIZE) {
-      message.error('文件大小超过 15MB 限制')
-      return
-    }
-    setUploading(true)
-    try {
-      await uploadDocument(target.courseId, target.lessonId, file)
-      message.success(`已创建页面「${file.name}」`)
-    } catch (err) {
-      message.error((err as Error).message)
-    } finally {
-      setUploading(false)
-    }
+  /** 上传文档建页（§3.2.3）：打开两步弹窗 */
+  const openUpload = (
+    courseId: string,
+    lessonId: string,
+    lessonTitle: string,
+  ) => {
+    setUploadTarget({ courseId, lessonId, lessonTitle })
   }
 
   const menuFor = (node: TreeDataNode) => {
@@ -253,12 +230,13 @@ export function CourseTree({ keyword }: { keyword: string }) {
       return {
         items: [
           { key: 'new-page', label: '新建页面' },
-          { key: 'upload', label: uploading ? '上传中…' : '上传文档建页', disabled: uploading },
+          { key: 'upload', label: '上传文档建页' },
           { key: 'del-lesson', label: '删除章节', danger: true },
         ],
         onClick: ({ key }: { key: string }) => {
           if (key === 'new-page') openCreate('page', ops.courseId, ops.lessonId)
-          if (key === 'upload') startUpload(ops.courseId, ops.lessonId!)
+          if (key === 'upload')
+            openUpload(ops.courseId, ops.lessonId!, node.title as string)
           if (key === 'del-lesson')
             confirmDelete('章节（含其下所有页面）', () =>
               deleteLesson(ops.courseId, ops.lessonId!),
@@ -303,7 +281,6 @@ export function CourseTree({ keyword }: { keyword: string }) {
     <>
       <div className="course-tree-no-switcher">
         <Tree
-          showIcon
           blockNode
           treeData={treeData}
           expandedKeys={expandedKeys}
@@ -330,15 +307,32 @@ export function CourseTree({ keyword }: { keyword: string }) {
                 style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 onClick={onRowClick}
               >
-                {stale ? (
-                  <Tooltip title="该节点与外部源不同步，不会作为 AI Tutor 知识库使用；内容已失效，可自行复制所需内容后删除">
-                    <span style={{ color: '#bfbfbf', fontStyle: 'italic' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  {isCourse ? (
+                    <BookOutlined style={{ color: '#1677ff' }} />
+                  ) : isLesson ? (
+                    <FolderOutlined style={{ color: '#faad14' }} />
+                  ) : (
+                    <FileTextOutlined style={{ color: '#8c8c8c' }} />
+                  )}
+                  {stale ? (
+                    <Tooltip title="该节点与外部源不同步，不会作为 AI Tutor 知识库使用；内容已失效，可自行复制所需内容后删除">
+                      <span style={{ color: '#bfbfbf', fontStyle: 'italic' }}>
+                        {node.title as string}
+                      </span>
+                    </Tooltip>
+                  ) : (
+                    <span
+                      style={{
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
                       {node.title as string}
                     </span>
-                  </Tooltip>
-                ) : (
-                  <span>{node.title as string}</span>
-                )}
+                  )}
+                </span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                   {(isCourse || isLesson) && (
                     <RightOutlined
@@ -364,12 +358,9 @@ export function CourseTree({ keyword }: { keyword: string }) {
           }}
         />
       </div>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept={UPLOAD_ALLOWED_EXTENSIONS.join(',')}
-        style={{ display: 'none' }}
-        onChange={onFileChosen}
+      <UploadDocumentModal
+        target={uploadTarget}
+        onClose={() => setUploadTarget(null)}
       />
       <Modal
         open={!!inputState}

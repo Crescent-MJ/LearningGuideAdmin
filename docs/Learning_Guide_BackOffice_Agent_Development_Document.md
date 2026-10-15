@@ -221,7 +221,8 @@ Knowledge System 是系统的主界面，采用左右两栏布局：
 
 - 实现三级嵌套树形组件：Course（一级）-> Lesson（二级）-> Page（三级）
 - **树按同步目标过滤（2026-10-15 用户裁决）**：树中只显示当前同步目标对应的本地课程（经 `GET /api/sync/external-courses` 的 `localCourseId` 映射）；目标尚未同步（无本地课程）时显示空态提示「该课程尚未同步，点击下方 Sync 拉取」。不再一次展示全部本地课程
-- Course 节点展开/收起（2026-10-15 改）：**隐藏 AntD Tree 原生左侧箭头**，点击课程行任意位置即展开/收起；行尾（⋮ 菜单左侧）放旋转 chevron（收起 ▸ / 展开 ▾）作为可展开提示，配合整行 hover 高亮
+- Course 节点展开/收起（2026-10-15 改）：**隐藏 AntD Tree 原生左侧箭头**（`display:none` 不占位，课程名顶栏最左），点击课程行任意位置即展开/收起；行尾（⋮ 菜单左侧）放旋转 chevron（收起 ▸ / 展开 ▾）作为可展开提示，配合整行 hover 高亮
+- 节点图标（📖/📁/📄）不用 AntD `showIcon`，改在自定义行内渲染（避免图标与标题换行错位）；层级缩进收紧（indent 16px），Course 顶左、Lesson/Page 逐级缩进（2026-10-15 格式修正）
 - Page 节点可点击选中，选中后右侧编辑器加载该 Page 的 Markdown 内容
 - 支持搜索框，按页面标题过滤树节点
 - Lesson 节点悬停菜单含「**上传文档建页**」（见 §3.2.3）
@@ -254,11 +255,13 @@ Knowledge System 是系统的主界面，采用左右两栏布局：
 
 > **Mock 实现（2026-10-14）**：外部源为后端内存 fixture（`server/src/sync/demo-fixtures.ts`），真实外部 API 接入（§12 事项 #4）后替换数据源、同步算法不变。
 
-#### 3.2.3 上传文档建页（2026-10-15 实现落地）
+#### 3.2.3 上传文档建页（2026-10-15 实现落地；同日按用户设计稿改为两步弹窗「Upload and Parse」）
 
-- **入口**：树中 Lesson 节点悬停菜单「上传文档建页」→ 系统文件选择器（单选）
-- **流程**：前端预校验（扩展名白名单 + ≤15MB，§10.1）→ `POST /api/files/upload`（multipart：`file` + `lessonId`）→ 后端二次校验 → markitdown-ts **本地**转换（§12 事项 #3 拍板，不调外部服务）→ 在该 Lesson 下新建 Page（标题=文件名去扩展名，contentMd=转换结果，`syncState=SYNCED`）→ 返回新 Page，前端刷新树并自动选中进编辑器
-- **失败**：格式不支持/超限/转换失败均返回 400（统一响应格式），前端 message 提示，不落任何文件到磁盘（内存 Buffer 直转，无临时目录）
+- **入口**：树中 Lesson 节点悬停菜单「上传文档建页」→ 打开弹窗（不再直接调系统文件选择器）
+- **弹窗两步**（按用户设计稿）：
+  1. **选择文件**：虚线拖拽区（Drag and drop file, or Browse）+ 文件 chip；前端预校验（扩展名白名单 + ≤15MB，§10.1）；文案按**实际白名单 8 格式**显示（设计稿中 xls/doc/epub/ppt 不支持，2026-10-15 确认按拍板白名单）；Next 进入解析
+  2. **转换预览**：`POST /api/files/convert`（仅 multipart `file`）→ 后端二次校验 → markitdown-ts **本地**转换（§12 事项 #3 拍板，不调外部服务）→ 弹窗内预览返回的 Markdown 内容；**Import** 才真正建页：复用 `POST /api/lessons/:lessonId/pages`（§5.1.3）以 `{ title, contentMd: markdown }` 新建 Page（标题=文件名去扩展名，`syncState=SYNCED`）→ 前端刷新树并自动选中进编辑器
+- **失败**：格式不支持/超限/转换失败/结果为空均 400（统一响应格式），弹窗内提示；Cancel 或关闭弹窗则什么都不落（转换阶段不建页、不落盘，内存 Buffer 直转）
 - 音视频文件**不在本轮范围**（2026-10-15 拍板，随 §12 事项 #4 真实外部源接入一并设计）
 
 ### 3.3 右侧内容区 - Tab 1: Knowledge Pages（编辑器）
@@ -500,11 +503,13 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 > 同步语义详见 §3.2.2（外部源接管模型）。Mock 阶段外部源为后端内存 fixture；真实外部 API 接入（§12 事项 #4）后替换数据源。
 
-#### 5.1.6 文件上传（2026-10-15 新增，§3.2.3/§10）
+#### 5.1.6 文件上传（2026-10-15 新增；同日按 §3.2.3 弹窗设计改为仅转换不建页）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /api/files/upload | multipart：`file`（白名单+≤15MB，§10.1）+ `lessonId`；markitdown-ts 本地转 Markdown 后在该 Lesson 下新建 Page 并返回（含 contentMd）；校验/转换失败 400 |
+| POST | /api/files/convert | multipart：`file`（白名单+≤15MB，§10.1）；markitdown-ts 本地转 Markdown，返回 `{ title, markdown }`（title=文件名去扩展名，含中文文件名乱码修复）；**不建页**——用户在弹窗预览确认后经 §5.1.3 `POST /api/lessons/:lessonId/pages` 建页；校验/转换失败 400 |
+
+> 原 `POST /api/files/upload`（转换+建页一步完成）已废弃（2026-10-15），被两步流程取代。
 
 ### 5.2 AI 相关接口
 
@@ -733,7 +738,7 @@ NODE_ENV=development
 
 # 文件上传配置
 MAX_FILE_SIZE=15728640  # 15MB
-ALLOWED_EXTENSIONS="txt,md,pdf,html,xlsx,xls,doc,docx,csv,xml,epub,ppt"
+ALLOWED_EXTENSIONS="txt,md,csv,pdf,docx,xlsx,html,xml"  # 与 §10.1 拍板白名单一致（2026-10-15 更正；实际实现为 files.service.ts 常量，不读该 env）
 ```
 
 ---
@@ -782,13 +787,13 @@ ALLOWED_EXTENSIONS="txt,md,pdf,html,xlsx,xls,doc,docx,csv,xml,epub,ppt"
 
 ### 10.2 处理流程
 
-1. 前端校验文件类型和大小
-2. 上传到后端 `POST /api/files/upload`（附 `lessonId`，§3.2.3/§5.1.6）
+1. 弹窗步骤①：前端校验文件类型和大小（扩展名白名单 + ≤15MB）
+2. 弹窗步骤②上传到后端 `POST /api/files/convert`（multipart `file`，§3.2.3/§5.1.6）
 3. 后端二次校验文件类型白名单与大小（multer limits）
 4. 内存 Buffer 直转，**不落临时目录**（2026-10-15 实现拍板）
 5. 调用转换服务：**markitdown-ts**（本地，§12 事项 #3 拍板）
-6. 生成 Markdown 内容
-7. 在指定 Lesson 下新建 Page（标题=文件名去扩展名）并返回，前端刷新树自动选中
+6. 生成 Markdown 内容，返回 `{ title, markdown }` 供弹窗预览
+7. 用户点击 **Import** → 经 §5.1.3 页面创建接口在指定 Lesson 下新建 Page（标题=文件名去扩展名），前端刷新树自动选中；Cancel 则不落任何数据
 
 ### 10.3 转换服务选型建议
 

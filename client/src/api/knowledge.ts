@@ -136,15 +136,21 @@ export const knowledgeApi = {
   syncAll: (externalId: string) =>
     http.post<SyncSummary>('/sync/all', { externalId }).then((r) => r.data),
 
-  // 文件上传（§5.1.6 / §3.2.3 / §10）：转换后在指定 Lesson 下新建 Page 并返回
-  uploadFile: (lessonId: string, file: File) => {
+  // 文档转换（§5.1.6 / §3.2.3 / §10）：仅本地转换返回预览，不建页；
+  // Import 经上方 createPage（§5.1.3）建页
+  convertFile: (file: File) => {
     const form = new FormData()
     form.append('file', file)
-    form.append('lessonId', lessonId)
     return http
-      .post<PageNode>('/files/upload', form, { timeout: 60000 }) // 大文件+本地转换放宽超时
+      .post<ConvertedDocument>('/files/convert', form, { timeout: 60000 }) // 大文件+本地转换放宽超时
       .then((r) => r.data)
   },
+}
+
+/** §5.1.6 转换结果（title=文件名去扩展名） */
+export interface ConvertedDocument {
+  title: string
+  markdown: string
 }
 
 /** §10.1 上传白名单（与 server/src/files/files.service.ts ALLOWED_EXTENSIONS 保持一致） */

@@ -59,11 +59,11 @@ interface KnowledgeState {
   /** 执行同步并刷新相关树；返回摘要供 UI 提示 */
   runSync: (mode: 'structure' | 'all') => Promise<SyncSummary>
 
-  /** 上传文档建页（§3.2.3）：转换成功后刷新树并选中新页 */
-  uploadDocument: (
+  /** 弹窗 Import（§3.2.3 两步流程）：以转换预览内容建页 → 刷新树并选中新页 */
+  importDocument: (
     courseId: string,
     lessonId: string,
-    file: File,
+    doc: { title: string; contentMd: string },
   ) => Promise<void>
 
   /**
@@ -215,8 +215,11 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
     }
   },
 
-  async uploadDocument(courseId, lessonId, file) {
-    const page = await knowledgeApi.uploadFile(lessonId, file)
+  async importDocument(courseId, lessonId, doc) {
+    const page = await knowledgeApi.createPage(lessonId, {
+      title: doc.title,
+      contentMd: doc.contentMd,
+    })
     await get().refreshDetail(courseId)
     await get().selectPage(courseId, page.id)
   },

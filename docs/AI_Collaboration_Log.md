@@ -5,6 +5,23 @@
 
 ---
 
+## 2026-10-15 ｜ 细节调整第三轮：树格式修正 + 上传改两步弹窗（Upload and Parse）+ 编辑器块化拍板 BlockNote 方向
+
+- **任务**：用户手动冒烟第二轮后反馈 3 点：① 课程名应顶栏最左（`visibility:hidden` 仍占位留白）、图标与标题换行错位需修 ② 上传按设计稿改两步弹窗（选文件→转换预览→Import 建页）③ md 编辑器块化（Notion/Jupyter 式）——第 ③ 点仅讨论拍方向，不动代码
+- **用户拍板**：
+  - ① 方案经确认执行：树 `display:none` 去占位+行内自绘图标+indent 16px；接口拆为 `POST /api/files/convert`（仅转换返回 `{title, markdown}` 不建页），Import 复用 §5.1.3 建页；弹窗文案按实际白名单 8 格式（设计稿中 xls/doc/epub/ppt 不支持）；预览区显示原始 md 文本（与设计稿一致）
+  - ③ 编辑器块化技术路线=**BlockNote**（用户调研建议+我方案对齐确认）：存储仍 `contentMd` 单一事实来源（`tryParseMarkdownToBlocks` 加载 / `blocksToMarkdownLossy` 保存，不动表结构）；保留「源码模式」兜底防 fidelity 损失；图片上传端点为待设计项。本轮无代码
+- **变更清单**：
+  - **设计文档先行同步**：§3.2.1（display:none+行内图标+16px indent）、§3.2.3 重写两步弹窗流程、§5.1.6（upload→convert、原端点废弃注记）、§10.2 流程 7 步、§8 env 示例白名单笔误修正（Review 设计偏差上报项）
+  - **后端**：`files.service.ts` `uploadAndCreatePage`→`convertFile`（去 PagesService 依赖，白名单/15MB/空结果/busboy latin1 乱码修复全保留）；`files.controller.ts` `POST /files/convert`（无 lessonId）；`files.module.ts` 去 PagesModule import；`pages.module.ts` 回退 exports；删 `dto/upload-file.dto.ts`；spec 5 用例、e2e 6 用例改写（含 convert 不建页计数断言 + 两步完整流程落库校验）
+  - **前端**：`api/knowledge.ts`（uploadFile→convertFile+ConvertedDocument）；`knowledgeStore.ts`（uploadDocument→importDocument）；新组件 `UploadDocumentModal.tsx`（Dragger 预校验→Next 转换→预览→Import；代际号防关闭竞态）；`CourseTree.tsx`（去 showIcon/隐藏 input，行内图标+标题 ellipsis，菜单项开弹窗）；`index.css`（switcher display:none、indent-unit 16px）
+- **自测证据**：server `tsc --noEmit` 0 错、client `tsc -b` 0 错；单测 9 套件 **35/35**；e2e 4 套件 **44/44**（files e2e 6 用例：convert 返回不建页、两步流程建页落库、.exe 400、无 file 400、15MB+1→400、信封脱敏）。冒烟由用户手动执行
+- **审查结论**：Review Agent 独立审查 **APPROVE，0 Blocking**。6 项 Non-blocking：#1 转换中关闭弹窗竞态（**已当场修**：genRef 代际号丢弃 in-flight 结果）、#2 onRemove 死代码（**已当场修**：删除）、#3 步骤②无返回按钮（UX 备忘）、#4 本日志（已补）、#5 convert 无速率限制（沿用遗留，§9.4 口径待用户裁决）；另 §8 白名单笔误（设计偏差上报）**已回填**
+- **Git**：用户拍板本地提交 main 攒批（与 c5958b5/0be4959 一起，冒烟反馈修完后统一推分支/PR）
+- **下一步**：用户重启前后端手动冒烟（树对齐、两步弹窗上传真实 docx/pdf、Import 建页）→ 反馈修复；第 ③ 点出 BlockNote 详细设计稿（交互细节+md fidelity 映射表+图片上传方案）供拍板
+
+---
+
 ## 2026-10-15 ｜ 细节调整第二轮：Knowledge 左侧面板（目标过滤 + 去锁 + 点击展开 + 文档上传）
 
 - **任务**：用户附截图反馈 Knowledge 面板 4 点调整：① 课程树按同步目标过滤（选 Calculus Fundamentals 只显示其 lessons，不混显 Population Growth）② 移除同步目标上锁/解锁功能 ③ 点击课程名下拉 lessons、隐藏原生箭头并另设提示 ④ 实现此前未落地的文档上传功能
