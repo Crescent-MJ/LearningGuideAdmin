@@ -5,6 +5,25 @@
 
 ---
 
+## 2026-10-15 ｜ 细节调整第四轮：Markdown 编辑器改 BlockNote 块编辑器（§3.3.2）
+
+- **任务**：§3.3.2 编辑器选型由 `@uiw/react-md-editor` 全文编辑改为 **BlockNote**（用户拍板 Notion/Jupyter 式）；存储不变（`Page.contentMd` 唯一事实来源，`blocksToMarkdownLossy` 序列化），源码模式保留兜底
+- **用户拍板**：输入=源码快捷语法、失焦/切块自动保存渲染；拖拽重排启用；模式切换按钮放 Tags 左侧；右键菜单插入块 + 选中浮窗；图片本轮仅外链 URL
+- **实现要点**：
+  - 依赖：`@blocknote/react@0.56.0` + `@blocknote/math-block@0.56.0` + `@blocknote/core@0.56.0`（注意：`BlockNoteView` 实际导出名是 `BlockNoteViewRaw`；数学包是 `@blocknote/math-block` 而非不存在的 `@blocknote/math`）
+  - Schema：`BlockNoteSchema.create` 扩展 `mathBlock` 块 + `math` 行内内容；`SuggestionMenuController` 注入默认 + `getMathSlashMenuItems`
+  - 数据往返：`tryParseMarkdownToBlocks` 加载 / `blocksToMarkdownLossy` 保存；`lastLoadedMd` ref 防源码↔块模式切换数据丢失；`loadingRef` + rAF 屏蔽加载期 onChange
+  - 右键插入：AntD `Dropdown` trigger contextMenu + `getTextCursorPosition` + `insertBlocks(after)`；标题映射 `heading1/2/3 → heading + props.level`
+  - 选中浮窗：BlockNote 原生 `formattingToolbar`（粗体/斜体/下划线/删除线/行内代码/链接/高亮）
+  - 图片：`uploadFile` prompt 索取外链 URL，slash 菜单与右键入口一致
+- **已知限制（下轮补）**：选中浮窗「转公式」按钮未实现（需 ProseMirror 级选区替换为 math 行内内容）；当前可通过 `$…$` 语法或 `/` 斜杠菜单插入公式
+- **自测证据**：client `tsc -b` 0 错、`vite build` 成功（chunk 3.6MB 为 BlockNote+KaTeX 体积，正常）；后端单测 35/35、e2e 44/44（无变更）
+- **审查结论**：首轮 REQUEST_CHANGES（2 Blocking：标题块类型 heading1/2/3 错误、源码→块模式数据丢失）+ 6 Non-blocking；修复后复审 **APPROVE（0 Blocking）**。Non-blocking 中 5 项已修（双重防抖、降级提示、加载期屏蔽保存、空结果降级、图片双轨），N2 转公式按钮留作已知限制
+- **Git**：用户拍板本地提交 main 攒批（与 c5958b5/0be4959/e89ff21 一起，冒烟反馈修完后统一推分支/PR）
+- **下一步**：用户重启前端冒烟（块编辑/数学/拖拽/右键/模式切换/上传 md 自动加载）→ 反馈修复；N2 转公式按钮下轮补全
+
+---
+
 ## 2026-10-15 ｜ 细节调整第三轮：树格式修正 + 上传改两步弹窗（Upload and Parse）+ 编辑器块化拍板 BlockNote 方向
 
 - **任务**：用户手动冒烟第二轮后反馈 3 点：① 课程名应顶栏最左（`visibility:hidden` 仍占位留白）、图标与标题换行错位需修 ② 上传按设计稿改两步弹窗（选文件→转换预览→Import 建页）③ md 编辑器块化（Notion/Jupyter 式）——第 ③ 点仅讨论拍方向，不动代码
