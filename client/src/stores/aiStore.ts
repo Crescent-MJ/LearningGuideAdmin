@@ -13,9 +13,6 @@ interface AiForm {
   systemPrompt: string
   welcomeMsg: string
   llmModel: string
-  /** 新输入的 key；空字符串=不修改（除非 clearApiKey） */
-  apiKeyInput: string
-  clearApiKey: boolean
 }
 
 interface AiState {
@@ -26,6 +23,8 @@ interface AiState {
   templates: { LECTURE?: PromptTemplate; SOCRATIC?: PromptTemplate }
   config: AiConfigView | null
   form: AiForm
+  /** 初始表单快照，用于检测未保存修改（§4.2.5 Unsaved changes） */
+  initialForm: AiForm | null
   saving: boolean
   messages: ChatMessage[]
   streaming: boolean
@@ -39,6 +38,7 @@ interface AiState {
   reset: () => Promise<void>
   newChat: () => void
   send: (text: string) => Promise<void>
+  isDirty: () => boolean
 }
 
 /** 会话按 courseId+mode 隔离存 localStorage（§4.3.2 拍板：不落库） */
@@ -83,7 +83,8 @@ export const useAiStore = create<AiState>((set, get) => ({
   models: [],
   templates: {},
   config: null,
-  form: { systemPrompt: '', welcomeMsg: '', llmModel: '', apiKeyInput: '', clearApiKey: false },
+  form: { systemPrompt: '', welcomeMsg: '', llmModel: '' },
+  initialForm: null,
   saving: false,
   messages: [],
   streaming: false,
@@ -110,16 +111,16 @@ export const useAiStore = create<AiState>((set, get) => ({
     const config = await aiApi.getConfig(courseId)
     const eff = effectivePrompts(config, templates, mode)
     const stored = loadChat(courseId, mode)
+    const form = {
+      systemPrompt: eff.systemPrompt,
+      welcomeMsg: eff.welcomeMsg,
+      llmModel: config.llmModel,
+    }
     set({
       selectedCourseId: courseId,
       config,
-      form: {
-        systemPrompt: eff.systemPrompt,
-        welcomeMsg: eff.welcomeMsg,
-        llmModel: config.llmModel,
-        apiKeyInput: '',
-        clearApiKey: false,
-      },
+      form,
+      initialForm: { ...form },
       messages: stored ?? (eff.welcomeMsg ? [{ role: 'ai', content: eff.welcomeMsg, createdAt: now() }] : []),
       error: null,
     })
@@ -133,15 +134,27 @@ export const useAiStore = create<AiState>((set, get) => ({
     }
     const eff = effectivePrompts(config, templates, mode)
     const stored = loadChat(selectedCourseId, mode)
+    const form = { ...get().form, systemPrompt: eff.systemPrompt, welcomeMsg: eff.welcomeMsg }
     set({
       mode,
-      form: { ...get().form, systemPrompt: eff.systemPrompt, welcomeMsg: eff.welcomeMsg },
+      form,
+      initialForm: { ...form },
       messages: stored ?? (eff.welcomeMsg ? [{ role: 'ai', content: eff.welcomeMsg, createdAt: now() }] : []),
     })
   },
 
   patchForm(patch) {
     set({ form: { ...get().form, ...patch } })
+  },
+
+  isDirty() {
+    const { form, initialForm } = get()
+    if (!initialForm) return false
+    return (
+      form.systemPrompt !== initialForm.systemPrompt ||
+      form.welcomeMsg !== initialForm.welcomeMsg ||
+      form.llmModel !== initialForm.llmModel
+    )
   },
 
   async save() {
@@ -156,12 +169,10 @@ export const useAiStore = create<AiState>((set, get) => ({
         customSystemPrompt: form.systemPrompt,
         customWelcomeMsg: form.welcomeMsg,
       }
-      if (form.clearApiKey) payload.apiKey = ''
-      else if (form.apiKeyInput) payload.apiKey = form.apiKeyInput
       const next = await aiApi.saveConfig(payload)
       set({
         config: next,
-        form: { ...form, apiKeyInput: '', clearApiKey: false },
+        initialForm: { ...form },
         error: null,
       })
     } catch (e) {
@@ -176,15 +187,15 @@ export const useAiStore = create<AiState>((set, get) => ({
     if (!selectedCourseId) return
     const next = await aiApi.resetConfig(selectedCourseId)
     const eff = effectivePrompts(next, templates, mode)
+    const form = {
+      systemPrompt: eff.systemPrompt,
+      welcomeMsg: eff.welcomeMsg,
+      llmModel: next.llmModel,
+    }
     set({
       config: next,
-      form: {
-        systemPrompt: eff.systemPrompt,
-        welcomeMsg: eff.welcomeMsg,
-        llmModel: next.llmModel,
-        apiKeyInput: '',
-        clearApiKey: false,
-      },
+      form,
+      initialForm: { ...form },
     })
   },
 

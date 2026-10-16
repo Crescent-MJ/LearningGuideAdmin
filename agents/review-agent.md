@@ -31,7 +31,7 @@
 ### 审查维度（按序执行）
 1. **设计一致性**：Prisma Schema 与文档 §2 一致；API 路径/参数/响应与 §5 一致；
    模块行为与 §3/§4 一致——发布以整 Course 为快照粒度、版本号格式
-   `CourseName_YYYYMMDDHHmmss`、Sync 两档（structure / all）、模式切换联动提示词、
+   `CourseName_YYYYMMDDHHmm`、Sync 两档（structure / all）、模式切换联动提示词、
    Reset 恢复默认模板、Prompt 覆盖优先级 custom > template
 2. **架构原则符合性**：LLM Provider 走策略模式/适配器、无厂商硬编码散落；Chunking /
    Vector Search 只留钩子未提前实现；统一响应格式（success/data/error/message）全覆盖；

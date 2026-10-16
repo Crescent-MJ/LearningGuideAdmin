@@ -32,7 +32,7 @@ export class ReleasesService {
    * 发布 Course 快照并激活：将当前 Lessons/Pages 内容固化为不可变 snapshotData，
    * 并将 Course.currentReleaseId 指向新 Release（发布即激活，§3.4.3）。
    * 快照仅收录 syncState=SYNCED 节点（延续 §3.2.2「STALE 不作 AI 知识库」）。
-   * versionTag 格式: "CourseName_YYYYMMDDHHmmss"（§2 Release 模型）。
+   * versionTag 格式: "CourseName_YYYYMMDDHHmm"（精确到分钟，2026-10-15 拍板去秒，§2 Release 模型）。
    */
   async publish(courseId: string, dto: CreateReleaseDto) {
     // §3.4.3「单事务」：读取草稿树与写入快照/激活指针同一事务，
@@ -170,13 +170,13 @@ export class ReleasesService {
     return release;
   }
 
-  /** 本地时间 YYYYMMDDHHmmss */
+  /** 本地时间 YYYYMMDDHHmm（精确到分钟，2026-10-15 拍板去秒） */
   private timestamp(): string {
     const d = new Date();
     const p = (n: number): string => String(n).padStart(2, '0');
     return (
       `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}` +
-      `${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`
+      `${p(d.getHours())}${p(d.getMinutes())}`
     );
   }
 }

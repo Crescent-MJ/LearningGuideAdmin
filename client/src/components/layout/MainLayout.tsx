@@ -25,7 +25,7 @@ export function MainLayout({
   return (
     <Layout style={{ height: '100vh' }}>
       <AppHeader />
-      <Layout>
+      <Layout style={{ flexDirection: 'row' }}>
         <ModuleNav active={activeModule} onChange={onModuleChange} />
         {sidebar && (
           <Sider

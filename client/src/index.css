@@ -15,3 +15,28 @@ body,
 .course-tree-no-switcher .ant-tree-indent-unit {
   width: 16px;
 }
+
+/* BlockNote 编辑器浮层（选中格式化工具栏、链接工具栏等）确保不被裁剪且层级最高 */
+.bn-editor {
+  min-height: 100%;
+}
+.bn-floating-toolbar,
+.bn-formatting-toolbar,
+.bn-link-toolbar {
+  z-index: 10000 !important;
+}
+/* sideMenu 拖拽手柄 hover 可见 */
+.bn-side-menu {
+  z-index: 100;
+}
+
+/* AI Tutor 配置面板（§4.2）：用 plain div 直接控制 flex 比例，无需穿透 antd Form.Item */
+
+/* AI Tutor 模式切换 Segmented：选中项蓝色高亮 */
+.ai-mode-segmented .ant-segmented-item-selected {
+  background-color: #1677ff !important;
+  color: #fff !important;
+}
+.ai-mode-segmented .ant-segmented-item-selected .ant-segmented-item-label {
+  color: #fff !important;
+}

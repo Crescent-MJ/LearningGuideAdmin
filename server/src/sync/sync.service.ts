@@ -274,12 +274,16 @@ export class SyncService {
             );
             if (alreadySynced) continue;
 
-            // 本地旧页标 STALE，外部新内容作为新页插入
+            // 本地旧页标 STALE 并改名为 {title} (old)，腾出原标题给新同步页
+            const oldTitle = this.resolveTitle(`${lp.title} (old)`, pageTitles);
+            pageTitles.add(oldTitle);
+            pageTitles.delete(lp.title);
             await tx.page.update({
               where: { id: lp.id },
-              data: { syncState: SyncState.STALE },
+              data: { syncState: SyncState.STALE, title: oldTitle },
             });
             staleMarked += 1;
+            // 新同步页使用外部原标题，确保 countDiff 能匹配到
             const t = this.resolveTitle(ep.title, pageTitles);
             pageTitles.add(t);
             await tx.page.create({

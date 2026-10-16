@@ -13,6 +13,8 @@ export interface AiConfigView {
   lectureTemplateId: string | null
   socraticTemplateId: string | null
   hasApiKey: boolean
+  /** 当前课程激活版本的 versionTag（§4.3.1 对话头部展示） */
+  currentReleaseTag: string | null
 }
 
 export interface PromptTemplate {
@@ -35,7 +37,6 @@ export const aiApi = {
     llmModel: string
     customSystemPrompt?: string
     customWelcomeMsg?: string
-    apiKey?: string
   }) => http.put<AiConfigView>('/ai/config', data).then((r) => r.data),
   resetConfig: (courseId: string) =>
     http.post<AiConfigView>(`/ai/config/${courseId}/reset`).then((r) => r.data),

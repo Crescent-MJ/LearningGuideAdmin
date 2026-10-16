@@ -1,22 +1,44 @@
-import { App, Button, Card, Form, Input, Popconfirm, Select, Space, Tag } from 'antd'
+import { App, Button, Card, Input, Popconfirm, Select, Space, Typography } from 'antd'
 import { useAiStore } from '../../stores/aiStore'
+
+const { Text } = Typography
+
+/** 区块样式：flex 纵向，label 固定、输入区填满剩余高度 */
+const sectionStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  minHeight: 0,
+}
+const labelStyle: React.CSSProperties = {
+  fontSize: 14,
+  fontWeight: 500,
+  marginBottom: 4,
+  flexShrink: 0,
+}
+const extraStyle: React.CSSProperties = {
+  fontSize: 12,
+  color: '#8c8c8c',
+  marginTop: 4,
+  flexShrink: 0,
+}
 
 /**
  * AI Tutor 左侧配置面板（§4.2）：
- * Change Course / System Prompt / Welcome Message / LLM Model / API Key / Reset / Save。
+ * System Prompt / Welcome Message / LLM Model 按比例分布，底部 Reset + Save 固定。
+ * Change Course 已移至页面顶部栏（§4.1）。
+ * 注：API Key 统一使用服务端全局 OPENROUTER_API_KEY，课程级覆盖已下线（2026-10-15）。
  */
 export function ConfigPanel() {
   const { message } = App.useApp()
-  const courses = useAiStore((s) => s.courses)
-  const selectedCourseId = useAiStore((s) => s.selectedCourseId)
   const models = useAiStore((s) => s.models)
-  const config = useAiStore((s) => s.config)
   const form = useAiStore((s) => s.form)
   const saving = useAiStore((s) => s.saving)
+  const isDirty = useAiStore((s) => s.isDirty)
   const patchForm = useAiStore((s) => s.patchForm)
-  const selectCourse = useAiStore((s) => s.selectCourse)
   const save = useAiStore((s) => s.save)
   const reset = useAiStore((s) => s.reset)
+
+  const dirty = isDirty()
 
   const onSave = async () => {
     try {
@@ -37,88 +59,88 @@ export function ConfigPanel() {
   }
 
   return (
-    <Card title="AI Tutor 配置" size="small" style={{ height: '100%', overflow: 'auto' }}>
-      <Form layout="vertical" size="small">
-        <Form.Item label="Change Course">
-          <Select
-            value={selectedCourseId ?? undefined}
-            placeholder="选择课程"
-            onChange={(v) => void selectCourse(v)}
-            options={courses.map((c) => ({ value: c.id, label: c.title }))}
-          />
-        </Form.Item>
+    <Card
+      title="AI Tutor 配置"
+      size="small"
+      style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+      styles={{
+        body: {
+          flex: 1,
+          minHeight: 0,
+          padding: 12,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        },
+      }}
+    >
+      {/* System Prompt：占剩余空间的 70%，超出文本框可滚动 */}
+      <div style={{ ...sectionStyle, flex: '7 1 0', marginBottom: 12 }}>
+        <div style={labelStyle}>System Prompt</div>
+        <Input.TextArea
+          value={form.systemPrompt}
+          onChange={(e) => patchForm({ systemPrompt: e.target.value })}
+          style={{
+            fontFamily: 'monospace',
+            flex: 1,
+            minHeight: 0,
+            resize: 'none',
+          }}
+        />
+        <div style={extraStyle}>切换右侧模式时自动载入对应模板/自定义值</div>
+      </div>
 
-        <Form.Item label="LLM Model">
-          <Select
-            value={form.llmModel || undefined}
-            placeholder="选择模型"
-            onChange={(v) => patchForm({ llmModel: v })}
-            options={models.map((m) => ({ value: m, label: m }))}
-          />
-        </Form.Item>
+      {/* Welcome Message：占剩余空间的 30%，超出可滚动 */}
+      <div style={{ ...sectionStyle, flex: '3 1 0', marginBottom: 12 }}>
+        <div style={labelStyle}>Welcome Message</div>
+        <Input.TextArea
+          value={form.welcomeMsg}
+          onChange={(e) => patchForm({ welcomeMsg: e.target.value })}
+          style={{ flex: 1, minHeight: 0, resize: 'none' }}
+        />
+      </div>
 
-        <Form.Item
-          label={
-            <Space>
-              API Key（课程级，可选）
-              {config?.hasApiKey && <Tag color="green">已配置</Tag>}
-            </Space>
-          }
+      {/* LLM Model：自然高度，不参与比例分配 */}
+      <div style={{ ...sectionStyle, flex: '0 0 auto', marginBottom: 12 }}>
+        <div style={labelStyle}>LLM Model</div>
+        <Select
+          value={form.llmModel || undefined}
+          placeholder="选择模型"
+          onChange={(v) => patchForm({ llmModel: v })}
+          options={models.map((m) => ({ value: m, label: m }))}
+          style={{ width: '100%' }}
+        />
+      </div>
+
+      {/* 底部操作栏：固定在最下方；Reset 左、Save 右（§4.2.5） */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexShrink: 0,
+          paddingTop: 8,
+          borderTop: '1px solid #f0f0f0',
+        }}
+      >
+        <Popconfirm
+          title="重置为默认模板？"
+          description="将清除当前课程的自定义 Prompt 覆盖"
+          okText="重置"
+          cancelText="取消"
+          onConfirm={onReset}
         >
-          <Input.Password
-            value={form.apiKeyInput}
-            placeholder={config?.hasApiKey ? '留空保持不变' : '留空则使用服务端全局 Key'}
-            onChange={(e) => patchForm({ apiKeyInput: e.target.value })}
-            disabled={form.clearApiKey}
-          />
-          {config?.hasApiKey && !form.clearApiKey && (
-            <Button
-              type="link"
-              size="small"
-              danger
-              onClick={() => patchForm({ apiKeyInput: '', clearApiKey: true })}
-            >
-              清除已存 Key
-            </Button>
-          )}
-          {form.clearApiKey && (
-            <Button type="link" size="small" onClick={() => patchForm({ clearApiKey: false })}>
-              取消清除
-            </Button>
-          )}
-        </Form.Item>
-
-        <Form.Item label="System Prompt" extra="切换右侧模式时自动载入对应模板/自定义值">
-          <Input.TextArea
-            rows={6}
-            value={form.systemPrompt}
-            onChange={(e) => patchForm({ systemPrompt: e.target.value })}
-          />
-        </Form.Item>
-
-        <Form.Item label="Welcome Message">
-          <Input.TextArea
-            rows={3}
-            value={form.welcomeMsg}
-            onChange={(e) => patchForm({ welcomeMsg: e.target.value })}
-          />
-        </Form.Item>
-
+          <Button type="link" style={{ padding: 0 }}>
+            Reset
+          </Button>
+        </Popconfirm>
         <Space>
-          <Popconfirm
-            title="重置为默认模板？"
-            description="将清除当前课程的自定义 Prompt 覆盖"
-            okText="重置"
-            cancelText="取消"
-            onConfirm={onReset}
-          >
-            <Button>Reset</Button>
-          </Popconfirm>
+          {dirty && <Text type="warning">Unsaved changes</Text>}
           <Button type="primary" loading={saving} onClick={() => void onSave()}>
-            Save
+            Save Configuration
           </Button>
         </Space>
-      </Form>
+      </div>
     </Card>
   )
 }

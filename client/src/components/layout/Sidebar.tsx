@@ -47,9 +47,22 @@ export function Sidebar() {
           options={externalCourses.map((e) => ({
             value: e.externalId,
             label: (
-              <span style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                <span>{e.title}</span>
-                <Tag color={STATUS_META[e.status].color} style={{ marginInlineEnd: 0 }}>
+              <span
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 8,
+                  width: '100%',
+                }}
+              >
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {e.title}
+                </span>
+                <Tag
+                  color={STATUS_META[e.status].color}
+                  style={{ marginInlineEnd: 0, flexShrink: 0 }}
+                >
                   {STATUS_META[e.status].label}
                 </Tag>
               </span>
