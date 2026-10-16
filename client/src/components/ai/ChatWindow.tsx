@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Button, Card, Empty, Input, Segmented, Space, Spin } from 'antd'
-import { PlusOutlined, SendOutlined } from '@ant-design/icons'
+import { Alert, Avatar, Button, Card, Empty, Input, Segmented, Space, Spin, Tag } from 'antd'
+import { PlusOutlined, RobotOutlined, SendOutlined, UserOutlined } from '@ant-design/icons'
 import MDEditor from '@uiw/react-md-editor'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
@@ -11,34 +11,37 @@ const katexPlugins = {
   rehypePlugins: [rehypeKatex],
 }
 
-/** 单条消息气泡：user 右对齐纯文本，ai 左侧 Markdown+KaTeX（§4.3.4） */
+/** 默认头像占位（后续可替换为课程/用户自定义头像） */
+const AI_AVATAR = <RobotOutlined />
+const USER_AVATAR = <UserOutlined />
+
+/** 单条消息气泡：带头像，AI 左侧灰底，用户右侧蓝底（§4.3.4） */
 function Bubble({ msg }: { msg: ChatMessage }) {
-  if (msg.role === 'user') {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-        <div
-          style={{
-            maxWidth: '80%',
-            background: '#1677ff',
-            color: '#fff',
-            padding: '8px 12px',
-            borderRadius: 8,
-            whiteSpace: 'pre-wrap',
-          }}
-        >
-          {msg.content}
-        </div>
-      </div>
-    )
-  }
+  const isUser = msg.role === 'user'
   return (
-    <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: isUser ? 'row-reverse' : 'row',
+        alignItems: 'flex-start',
+        gap: 8,
+      }}
+    >
+      <Avatar
+        icon={isUser ? USER_AVATAR : AI_AVATAR}
+        style={{
+          backgroundColor: isUser ? '#1677ff' : '#52c41a',
+          flexShrink: 0,
+        }}
+      />
       <div
         style={{
-          maxWidth: '85%',
-          background: '#f5f5f5',
+          maxWidth: '75%',
+          background: isUser ? '#1677ff' : '#f5f5f5',
+          color: isUser ? '#fff' : 'inherit',
           padding: '8px 12px',
           borderRadius: 8,
+          whiteSpace: isUser ? 'pre-wrap' : 'normal',
         }}
       >
         {msg.content ? (
@@ -66,6 +69,7 @@ export function ChatWindow() {
   const streaming = useAiStore((s) => s.streaming)
   const error = useAiStore((s) => s.error)
   const selectedCourseId = useAiStore((s) => s.selectedCourseId)
+  const currentReleaseTag = useAiStore((s) => s.config?.currentReleaseTag)
   const setMode = useAiStore((s) => s.setMode)
   const newChat = useAiStore((s) => s.newChat)
   const send = useAiStore((s) => s.send)
@@ -90,8 +94,15 @@ export function ChatWindow() {
       style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
       styles={{ body: { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 } }}
       title={
-        <Space>
+        <Space size="middle" style={{ width: '100%', justifyContent: 'space-between' }}>
+          {/* 左侧：激活版本号 + Testing 徽章（§4.3.1） */}
+          <Space>
+            <span style={{ fontSize: 14 }}>{currentReleaseTag ?? '未发布'}</span>
+            <Tag color="green">Testing</Tag>
+          </Space>
+          {/* 中间：模式切换（蓝色高亮选中项） */}
           <Segmented
+            className="ai-mode-segmented"
             value={mode}
             onChange={(v) => void setMode(v as 'LECTURE' | 'SOCRATIC')}
             options={[
@@ -99,6 +110,7 @@ export function ChatWindow() {
               { label: 'Socratic', value: 'SOCRATIC' },
             ]}
           />
+          {/* 右侧：New Chat */}
           <Button size="small" icon={<PlusOutlined />} onClick={newChat}>
             New Chat
           </Button>
@@ -108,9 +120,19 @@ export function ChatWindow() {
       {error && (
         <Alert type="error" message={error} showIcon closable style={{ marginBottom: 8 }} />
       )}
-      <div ref={listRef} style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div
+        ref={listRef}
+        style={{
+          flex: 1,
+          overflow: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          padding: '4px 0',
+        }}
+      >
         {messages.length === 0 ? (
-          <Empty description={selectedCourseId ? '开始对话吧' : '请先在左侧选择课程'} />
+          <Empty description={selectedCourseId ? '开始对话吧' : '请先在顶部选择课程'} />
         ) : (
           messages.map((m, i) => <Bubble key={`${m.createdAt}-${i}`} msg={m} />)
         )}
@@ -119,7 +141,7 @@ export function ChatWindow() {
         <Input.TextArea
           value={input}
           autoSize={{ minRows: 1, maxRows: 4 }}
-          placeholder={selectedCourseId ? '输入问题，Enter 发送' : '请先选择课程'}
+          placeholder={selectedCourseId ? 'Ask the tutor a question...' : '请先选择课程'}
           disabled={!selectedCourseId || streaming}
           onChange={(e) => setInput(e.target.value)}
           onPressEnter={(e) => {
@@ -136,7 +158,7 @@ export function ChatWindow() {
           disabled={!selectedCourseId || !input.trim()}
           onClick={() => void onSend()}
         >
-          发送
+          Send
         </Button>
       </Space.Compact>
     </Card>

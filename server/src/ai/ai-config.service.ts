@@ -15,6 +15,8 @@ export interface AiConfigView {
   lectureTemplateId: string | null;
   socraticTemplateId: string | null;
   hasApiKey: boolean;
+  /** 当前课程激活版本的 versionTag（§4.3.1 对话头部展示） */
+  currentReleaseTag: string | null;
 }
 
 export interface ResolvedPrompts {
@@ -52,16 +54,16 @@ export class AiConfigService {
 
   /** §5.2：获取某 Course 的 AI 配置（无记录时返回默认视图） */
   async getConfig(courseId: string): Promise<AiConfigView> {
-    await this.ensureCourse(courseId);
+    const course = await this.ensureCourse(courseId);
     const cfg = await this.prisma.courseAiConfig.findUnique({
       where: { courseId },
     });
-    return this.toView(courseId, cfg);
+    return await this.toView(courseId, cfg, course.currentReleaseId);
   }
 
   /** §4.2.5：保存配置（apiKey 加密入库；省略=不变、空串=清除） */
   async saveConfig(dto: SaveAiConfigDto): Promise<AiConfigView> {
-    await this.ensureCourse(dto.courseId);
+    const course = await this.ensureCourse(dto.courseId);
     const existing = await this.prisma.courseAiConfig.findUnique({
       where: { courseId: dto.courseId },
     });
@@ -83,12 +85,12 @@ export class AiConfigService {
       create: { courseId: dto.courseId, ...data },
       update: data,
     });
-    return this.toView(dto.courseId, cfg);
+    return await this.toView(dto.courseId, cfg, course.currentReleaseId);
   }
 
   /** §4.2.4：重置 = 清除自定义覆盖，恢复默认模板 */
   async resetConfig(courseId: string): Promise<AiConfigView> {
-    await this.ensureCourse(courseId);
+    const course = await this.ensureCourse(courseId);
     const cfg = await this.prisma.courseAiConfig.upsert({
       where: { courseId },
       create: {
@@ -103,7 +105,7 @@ export class AiConfigService {
         socraticModeId: null,
       },
     });
-    return this.toView(courseId, cfg);
+    return await this.toView(courseId, cfg, course.currentReleaseId);
   }
 
   /**
@@ -158,7 +160,19 @@ export class AiConfigService {
     };
   }
 
-  private toView(courseId: string, cfg: CourseAiConfig | null): AiConfigView {
+  private async toView(
+    courseId: string,
+    cfg: CourseAiConfig | null,
+    currentReleaseId: string | null,
+  ): Promise<AiConfigView> {
+    let currentReleaseTag: string | null = null;
+    if (currentReleaseId) {
+      const release = await this.prisma.release.findUnique({
+        where: { id: currentReleaseId },
+        select: { versionTag: true },
+      });
+      currentReleaseTag = release?.versionTag ?? null;
+    }
     return {
       courseId,
       llmProvider: cfg?.llmProvider ?? 'openrouter',
@@ -168,14 +182,16 @@ export class AiConfigService {
       lectureTemplateId: cfg?.lectureModeId ?? null,
       socraticTemplateId: cfg?.socraticModeId ?? null,
       hasApiKey: Boolean(cfg?.apiKey),
+      currentReleaseTag,
     };
   }
 
-  private async ensureCourse(courseId: string): Promise<void> {
+  private async ensureCourse(courseId: string): Promise<{ id: string; currentReleaseId: string | null }> {
     const found = await this.prisma.course.findUnique({
       where: { id: courseId },
-      select: { id: true },
+      select: { id: true, currentReleaseId: true },
     });
     if (!found) throw new NotFoundException('课程不存在');
+    return found;
   }
 }

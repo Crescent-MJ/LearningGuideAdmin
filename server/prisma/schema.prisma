@@ -86,7 +86,7 @@ model Release {
   id            String   @id @default(uuid())
   courseId      String
   course        Course   @relation(fields: [courseId], references: [id])
-  versionTag    String // 版本号，格式: "CourseName_YYYYMMDDHHmmss"
+  versionTag    String // 版本号，格式: "CourseName_YYYYMMDDHHmm"（精确到分钟）
   revisionNotes String   @db.Text // 本次修订的备注
   snapshotData  Json // 完整内容快照: { lessons: [{ id, title, pages: [{id, title, contentMd, tags}] }] }
   createdAt     DateTime @default(now())

@@ -28,7 +28,7 @@ describe('ReleasesService', () => {
     service = new ReleasesService(mockPrisma as unknown as PrismaService);
   });
 
-  it('publish：快照应含 lessons/pages 内容，versionTag 匹配 CourseName_YYYYMMDDHHmmss，且发布即激活（更新 currentReleaseId）；读取与写入同事务（§3.4.3）', async () => {
+  it('publish：快照应含 lessons/pages 内容，versionTag 匹配 CourseName_YYYYMMDDHHmm，且发布即激活（更新 currentReleaseId）；读取与写入同事务（§3.4.3）', async () => {
     mockTx.course.findUnique.mockResolvedValue({
       id: 'c1',
       title: '数学基础',
@@ -50,7 +50,7 @@ describe('ReleasesService', () => {
       revisionNotes: '首发',
     })) as { versionTag: string; snapshotData: unknown; revisionNotes: string };
 
-    expect(result.versionTag).toMatch(/^数学基础_\d{14}$/);
+    expect(result.versionTag).toMatch(/^数学基础_\d{12}$/);
     expect(result.snapshotData).toEqual({
       lessons: [
         {
@@ -104,7 +104,7 @@ describe('ReleasesService', () => {
     mockPrisma.release.findUnique.mockResolvedValue({
       id: 'r2',
       courseId: 'c1',
-      versionTag: '数学基础_20261015000000',
+      versionTag: '数学基础_202610150000',
       snapshotData: {
         lessons: [
           {
@@ -123,7 +123,7 @@ describe('ReleasesService', () => {
 
     expect(result).toEqual({
       id: 'r2',
-      versionTag: '数学基础_20261015000000',
+      versionTag: '数学基础_202610150000',
     });
     // 旧树整棵删除（Page 级联）
     expect(mockTx.lesson.deleteMany).toHaveBeenCalledWith({

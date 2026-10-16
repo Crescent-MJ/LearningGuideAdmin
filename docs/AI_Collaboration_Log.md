@@ -5,6 +5,56 @@
 
 ---
 
+## 2026-10-15 ｜ 细节调整第六轮：AI Tutor 布局改版对齐设计稿 + 版本号去秒
+
+- **任务**：用户提供 AI Tutor 设计稿，要求按设计调整 AI Tutor 板块内容（不动 Knowledge/顶部/左侧导航）：① 顶部栏显示课程标题 + Change Course 下拉 ② 左侧配置重排为 System Prompt → Welcome Message → LLM Model，底部 Reset 链接 + Unsaved changes 提示 + Save Configuration ③ 对话头部显示激活版本号 + Testing 徽章（固定）④ 输入框占位符 "Ask the tutor a question..."、Send 按钮。另：用户发现版本号含秒，确认改为 `YYYYMMDDHHmm`（去秒）
+- **用户拍板**：
+  - 版本号格式去秒：`YYYYMMDDHHmm`（原 `YYYYMMDDHHmmss`）
+  - Testing 徽章固定显示（表示 AI 测试用知识库版本）
+  - Change Course 从左侧配置面板移到顶部全宽栏
+- **变更清单**：
+  - **后端**：
+    - `releases.service.ts`：`timestamp()` 去掉 `getSeconds()`，输出 12 位；注释同步
+    - `ai-config.service.ts`：`AiConfigView` 增加 `currentReleaseTag`；`ensureCourse` 返回 `{id, currentReleaseId}`；`toView` 改 async 查询激活 Release.versionTag；getConfig/saveConfig/resetConfig 三处调用加 await + 传 currentReleaseId
+    - `releases.service.spec.ts`：正则 `\d{14}`→`\d{12}`；mock 数据 versionTag 同步 12 位
+  - **前端**：
+    - `api/ai.ts`：`AiConfigView` 增加 `currentReleaseTag: string | null`
+    - `stores/aiStore.ts`：增加 `initialForm` 快照 + `isDirty()` 方法；selectCourse/setMode/save/reset 四处维护 initialForm 确保模式切换不误报 dirty
+    - `pages/AITutor.tsx`：新增顶部栏（课程标题 + Change Course 下拉），主体改为 column flex
+    - `components/ai/ConfigPanel.tsx`：移除 Change Course；重排 System Prompt(rows=8,等宽字体) → Welcome Message → LLM Model；底部三栏（Reset 链接 / Unsaved changes / Save Configuration）
+    - `components/ai/ChatWindow.tsx`：头部三栏（版本号+Testing 徽章 / Lecture-Socratic / New Chat）；占位符 "Ask the tutor a question..."；按钮 "Send"
+  - **文档**：§2/§3.4.1/§3.4.3 版本号去秒；§4.1/§4.2/§4.3 布局改版（§4.3.1 对话头部新增）；§5.2 接口说明加 currentReleaseTag；§4.3.3→§4.3.4 编号修正
+  - **其他**：`schema.prisma` versionTag 注释去秒；`review-agent.md` 审查标准版本号格式同步
+- **自测证据**：前端 `npx tsc --noEmit` 0 错；后端 `npx tsc --noEmit` 0 错；后端 `npm test` 9 suites / 35 tests 全绿
+- **审查结论**：Review Agent 独立审查 **APPROVE，0 Blocking**。3 项 Non-blocking：① schema.prisma versionTag 注释漂移（**已修**）② review-agent.md 格式未同步（**已修**）③ AI 协作日志（本条补）
+- **Git**：本地 main 攒批未推送
+- **下一步**：用户重启后端（使 currentReleaseTag 生效）+ 前端冒烟验证：顶部栏课程标题/Change Course、配置面板重排与 Unsaved changes 提示、对话头部版本号+Testing 徽章、新版本发布的 versionTag 是否为 12 位（去秒）
+
+---
+
+## 2026-10-15 ｜ 细节调整第五轮：AI Tutor 模型清单扩展 + 布局错位修复 + API Key 课程级覆盖下线
+
+- **任务**：用户针对 AI Tutor 板块提 3 点：① 读取 OpenRouter 可行模型并扩充 LLM Model 下拉（仅热门+免费额度，挑 8 个，必须含 deepseek flash 作测试）② AI Tutor 配置面板位置错位（应在 Knowledge/AI Tutor 导航栏右侧而非下方）③ 移除 API Key 课程级覆盖输入块（已配全局 OPENROUTER_API_KEY）
+- **用户拍板**：
+  - ① 8 模型清单：`deepseek/deepseek-v4.1-flash`（默认，测试用）、`deepseek/deepseek-r1`、`openai/gpt-4o-mini`、`anthropic/claude-haiku-5.5`、`google/gemini-3.5-flash`、`qwen/qwen3.6-flash`、`google/gemma-4-31b-it:free`、`nvidia/nemotron-3-super-120b-a12b:free`；所选模型即该课程对话用模型（测试+学生端）
+  - ② 布局修复方案：`MainLayout` 内层 `<Layout>` 加 `style={{ flexDirection: 'row' }}`（AntD Layout 无 Sider 时默认 column，导致 ModuleNav 与 Content 垂直堆叠）
+  - ③ 仅移除前端 UI，保留后端 `CourseAiConfig.apiKey` 字段与加密逻辑（最小改动、未来可恢复）
+  - 新增通用规则：「有问题先提问，跟用户沟通确认后再下决定」→ 写入 `.trae/rules/project_rules.md`
+- **变更清单**：
+  - `server/.env` + `server/.env.example`：`AI_AVAILABLE_MODELS` 扩充为 8 模型，deepseek-v4.1-flash 居首（后端 `defaultModel()` 取列表第一个）
+  - `client/src/components/layout/MainLayout.tsx`：内层 Layout 加 `flexDirection: 'row'`
+  - `client/src/components/ai/ConfigPanel.tsx`：移除 API Key Form.Item（含清除按钮）+ Tag import，更新顶部注释
+  - `client/src/stores/aiStore.ts`：AiForm 移除 `apiKeyInput`/`clearApiKey`；save/reset/selectCourse 中相关逻辑清理
+  - `client/src/api/ai.ts`：saveConfig 入参类型移除 `apiKey?`
+  - 设计文档 §4.2.3（默认模型/用途/API Key 下线说明）+ §8 env 示例同步 8 模型
+  - `.trae/rules/project_rules.md`：「用户裁决优先」节新增第 3 条规则
+- **自测证据**：前端 `npx tsc --noEmit` 0 错；后端 `npx tsc --noEmit` 0 错；后端 `npm test` 9 suites / 35 tests 全绿
+- **审查结论**：Review Agent 独立审查 **APPROVE，0 Blocking**。2 项 Non-blocking：① 文档 §8 示例漂移（**已当场修**：同步为 8 模型）② 前端 `hasApiKey` 字段无组件消费（保留，后端仍返回、留作未来 UI 提示）
+- **Git**：本地 main 攒批未推送（与 bf4ef55 等一起，待用户冒烟后统一推分支/PR）
+- **下一步**：用户重启后端（使新 AI_AVAILABLE_MODELS 生效）+ 前端冒烟验证：① LLM Model 下拉是否显示 8 个模型、默认是否为 deepseek-v4.1-flash ② AI Tutor 配置面板是否在导航栏右侧横向排列 ③ API Key 块是否已移除、Save 是否正常
+
+---
+
 ## 2026-10-15 ｜ 细节调整第四轮：Markdown 编辑器改 BlockNote 块编辑器（§3.3.2）
 
 - **任务**：§3.3.2 编辑器选型由 `@uiw/react-md-editor` 全文编辑改为 **BlockNote**（用户拍板 Notion/Jupyter 式）；存储不变（`Page.contentMd` 唯一事实来源，`blocksToMarkdownLossy` 序列化），源码模式保留兜底

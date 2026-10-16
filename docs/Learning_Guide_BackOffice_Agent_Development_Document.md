@@ -125,7 +125,7 @@ model Release {
   id              String    @id @default(uuid())
   courseId        String
   course          Course    @relation(fields: [courseId], references: [id])
-  versionTag      String    // 版本号，格式: "CourseName_YYYYMMDDHHmmss"
+  versionTag      String    // 版本号，格式: "CourseName_YYYYMMDDHHmm"（精确到分钟，2026-10-15 拍板去秒）
   revisionNotes   String    @db.Text  // 本次修订的备注
   snapshotData    Json      // 完整内容快照: { lessons: [{ id, title, pages: [{id, title, contentMd, tags}] }] }
   createdAt       DateTime  @default(now())
@@ -272,15 +272,49 @@ Knowledge System 是系统的主界面，采用左右两栏布局：
 - 右上角显示 Tags（标签），支持添加/删除
 - 主体区域为 Markdown 编辑器
 
-#### 3.3.2 Markdown 编辑器要求
+#### 3.3.2 Markdown 编辑器要求（2026-10-15 改拍：Notion/Jupyter 式块编辑器，BlockNote 实现）
 
-- ~~使用 `md-editor-v3` 组件~~ **编辑器选型改拍（2026-10-14，Phase 4 实装时用户裁决）**：`md-editor-v3` 为 Vue 3 组件库，与本项目 React 技术栈不兼容，改用 **`@uiw/react-md-editor`**（React 生态），KaTeX 经 `remark-math` + `rehype-katex` 插件接入
-- **必须开启 KaTeX 渲染**，支持 LaTeX 公式（如 `$E=mc^2$`）
-- 支持代码高亮
-- 支持实时预览
-- 支持 Markdown 表格（对应设计图中的 Q&A Table）
-- 内容编辑后自动保存到本地状态（防抖保存，建议 500ms 防抖）
-- 后续可扩展插件机制
+> **选型改拍（2026-10-15，用户裁决）**：原 `@uiw/react-md-editor` 全文 Markdown 编辑 + live 预览，不符合「逐块编辑、右键插入、无顶栏工具栏」的诉求。改用 **BlockNote**（`@blocknote/react`）实现 Notion/Jupyter 式块编辑器。
+
+**核心不变量（必须守住）**：
+
+- `Page.contentMd` 仍是**唯一存储格式**（§2 表结构不动；发布快照、AI 知识源、外部同步、上传转换全部基于 Markdown 字符串）。块只是**编辑视图**，保存时序列化回 md
+- **KaTeX 公式必须可用**（课程核心内容）——经 `@blocknote/math-block` 官方包接入：`$$…$$` 为数学块、`$…$` 为行内公式，底层用 KaTeX 渲染
+- **无源码模式切换**（2026-10-15 用户裁决移除）：纯块编辑，解析异常时仅提示不降级
+
+**交互模型**（2026-10-15 用户拍板细化 + 冒烟修正）：
+
+1. **输入=源码、失焦即渲染**：每个块编辑态显示可编辑文本，支持 Markdown 快捷语法（输入 `# ` 回车→H1、`- `→列表、`$$…$$`→数学块、`|a|b|`→表格等，BlockNote 原生 markdown shortcuts）；**失焦 / 切换到另一块 / 手动保存时**自动序列化回 md 并渲染预览态
+2. **无顶栏工具栏**，插入操作两种入口：
+   - **块左侧 ⋮ 柄菜单**（hover 显示）：在上方/下方插入块（段落、H1-H3、表格、图片、数学块、代码块、引用、有序/无序列表）、删除块、复制块、上移下移
+   - **右键菜单**（编辑区任意位置 contextmenu）：在光标所在块下方插入指定类型块，每项带图标（段落/标题/列表/表格/代码/引用/数学/图片）——用原生 `contextmenu` 事件 + AntD Dropdown 实现
+   - ~~斜杠命令 `/`~~：**已移除**（2026-10-15 冒烟反馈：触发白屏，移除）
+3. **选中内容浮窗**（BlockNote 原生 `formattingToolbar`）：选中文本后自动弹出小工具栏，含：粗体 / 斜体 / 下划线 / 删除线 / 行内代码 / 链接 / 标记（高亮）/ 颜色 / 清除格式
+4. **拖拽重排**：启用块左侧 drag handle（`sideMenu`），长按拖拽改变块顺序
+5. 顶部仅保留：页面标题（可编辑）、Tags、保存状态
+
+**数据往返（md ↔ blocks）**：
+
+| 方向 | API | 时机 |
+|------|-----|------|
+| 加载 | `tryParseMarkdownToBlocks(contentMd)` → `editor.replaceBlocks` | 选中页面、切换页面、激活版本后 |
+| 保存 | `blocksToMarkdownLossy(blocks)` → `editDraft({ contentMd })` | 块内容变更后 500ms 防抖（store 层） |
+
+> 解析失败（`tryParseMarkdownToBlocks` 返回空或异常）时仅 message 提示，不切换模式（无源码模式）。
+
+**图片处理（待设计，本轮仅外链）**：
+
+- 块编辑器图片块本轮**仅支持外链 URL**（右键/上传时 prompt 输入 URL）
+- 本地图片上传需新增 `POST /api/files/image`（存库/磁盘 + 返回 URL），属于**待设计项**，不在本轮实现（与音视频一起随 §12 #4 接入）
+- 表格插入：BlockNote 原生表格块，保存为 GFM 表格 md
+
+**与现有链路的兼容性**：
+
+- 上传建页（§3.2.3）产出的 `contentMd` 直接喂给 `tryParseMarkdownToBlocks`，无需改动转换侧
+- AI 知识源（§4.3.3）读的是 `contentMd` 字符串，与编辑器无关，不受影响
+- 发布快照存 `contentMd`，激活后同样经 `tryParseMarkdownToBlocks` 加载
+
+**依赖**：`@blocknote/react@0.56.0`、`@blocknote/mantine@0.56.0`（提供默认 UI 组件，含格式化浮窗、侧边拖拽手柄）、`@blocknote/math-block@0.56.0`、`@blocknote/core@0.56.0`；注意：0.56 为无头架构，`BlockNoteViewRaw` 不提供 UI，必须使用 `@blocknote/mantine` 的 `BlockNoteView`（内部注入 `ComponentsContext`）才能启用 formattingToolbar/sideMenu 等默认浮窗；导出名：`BlockNoteView`（来自 `@blocknote/mantine`，非 `BlockNoteViewRaw`）、数学包名 `@blocknote/math-block`（非 `@blocknote/math`）；`@uiw/react-md-editor` / `remark-math` / `rehype-katex` 保留供 AI ChatWindow 渲染使用
 
 #### 3.3.3 Tags 管理
 
@@ -298,7 +332,7 @@ Knowledge System 是系统的主界面，采用左右两栏布局：
 |------|------|
 | Course Name | 课程名称 |
 | Revision Notes | **激活版本**的备注（2026-10-15 随激活模型改拍，原「最近一次发布的备注」；若无则显示 "No revision notes provided"） |
-| Current Version | **激活版本**版本号（`Course.currentReleaseId` 指向的 Release），格式 `CourseName_YYYYMMDDHHmmss`，可点击 |
+| Current Version | **激活版本**版本号（`Course.currentReleaseId` 指向的 Release），格式 `CourseName_YYYYMMDDHHmm`，可点击 |
 | Action | Publish 按钮 |
 
 #### 3.4.2 Current Version 交互
@@ -322,7 +356,7 @@ Knowledge System 是系统的主界面，采用左右两栏布局：
 3. 确认后，前端调用 `POST /api/courses/:id/release` 接口，传入 revisionNotes
 4. 后端在**单事务**内执行以下逻辑：
    - 读取当前 Course 下所有 Lessons 及其对应的 Pages（**过滤 STALE 节点**）
-   - 生成版本号：`CourseTitle_YYYYMMDDHHmmss`
+   - 生成版本号：`CourseTitle_YYYYMMDDHHmm`
    - 将所有当前内容聚合为 JSON 快照
    - 写入 Release 表
    - 更新 `Course.currentReleaseId` = 新 Release（发布即激活；此刻草稿与快照内容一致，无需重建树）
@@ -338,26 +372,29 @@ Knowledge System 是系统的主界面，采用左右两栏布局：
 
 AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库来源于 Knowledge System 中选中的 Course。
 
-页面布局：
-- **左侧**：配置面板（Course 选择、System Prompt、Welcome Message、LLM Model 配置、Reset/Save 按钮）
-- **右侧**：测试对话窗口（模式切换、New Chat、消息列表、输入框）
+页面布局（2026-10-15 改版对齐设计稿）：
+- **顶部栏（全宽）**：左侧显示当前课程标题，右侧 "Change Course" 下拉选择器
+- **左侧**：配置面板（System Prompt、Welcome Message、LLM Model、Reset/Save 按钮）
+- **右侧**：测试对话窗口（头部显示激活版本号 + Testing 徽章、模式切换、New Chat、消息列表、输入框）
 
 ### 4.2 左侧配置面板
 
-#### 4.2.1 Change Course
+#### 4.2.1 System Prompt
 
-- 下拉框，列出所有 Course
-- 切换 Course 后，加载该 Course 的 AI 配置（PromptTemplate + 自定义配置）
-
-#### 4.2.2 System Prompt / Welcome Message
-
-- 文本域（Textarea），支持编辑当前课程使用的 AI 人设（System Prompt）和欢迎语
+- 文本域（Textarea，较大行数），支持编辑当前课程使用的 AI 人设
 - 编辑后需点击 "Save" 才能持久化
+
+#### 4.2.2 Welcome Message
+
+- 文本域（Textarea），支持编辑欢迎语
 
 #### 4.2.3 LLM Model 配置
 
-- 下拉框，切换模型（如 gpt-4o、gpt-3.5-turbo 等）
-- 后端需提供模型列表接口，支持扩展
+- 下拉框，切换模型（数据源为 `AI_AVAILABLE_MODELS` env，逗号分隔）
+- 后端需提供模型列表接口（`GET /api/ai/models`），支持扩展
+- **默认模型**：取 `AI_AVAILABLE_MODELS` 列表第一个；当前为 `deepseek/deepseek-v4.1-flash`
+- **用途**：所选模型即该课程 AI Tutor 对话使用的模型（含测试与学生端），保存后对该课程生效
+- **API Key**：统一使用服务端全局 `OPENROUTER_API_KEY`，课程级 API Key 覆盖已下线（2026-10-15）；后端 `CourseAiConfig.apiKey` 字段及加密逻辑保留，仅前端不再暴露入口
 
 #### 4.2.4 Reset 按钮
 
@@ -368,22 +405,29 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 - 保存当前修改到 CourseAiConfig 表
 - 包括：lectureModeId、socraticModeId、customSystemPrompt、customWelcomeMsg、llmProvider、llmModel 等
+- 配置面板底部左侧为 Reset 链接，中间显示 "Unsaved changes" 未保存提示，右侧为 "Save Configuration" 蓝色主按钮
 
 ### 4.3 右侧对话面板
 
-#### 4.3.1 模式切换
+#### 4.3.1 对话头部
 
-- 顶部按钮切换 `Lecture` 和 `Socratic` 模式
+- 左侧：当前课程激活版本号（`Course.currentReleaseId` 指向的 Release.versionTag）+ 绿色 "Testing" 徽章（固定显示，表示 AI 测试用知识库版本）
+- 中间：Lecture / Socratic 模式切换
+- 右侧：+ New Chat 按钮
+
+#### 4.3.2 模式切换
+
+- Segmented 切换 `Lecture` 和 `Socratic` 模式
 - **关键逻辑**：切换模式时，左侧的 System Prompt 输入框应自动更新为对应模式的提示词（优先使用自定义配置，无自定义则使用模板默认值）
 
-#### 4.3.2 New Chat
+#### 4.3.3 New Chat
 
 - 清空右侧对话框的当前聊天记录（含浏览器 localStorage 中的上次会话）
 - 显示 Welcome Message 作为 AI 的第一条消息
 
 > **对话持久化拍板（2026-10-14，§12 事项 #6）**：对话记录**不落库**。"上一次聊天"经浏览器 localStorage 持久化（按 courseId+mode 隔离），短时间退出页面再回来可恢复；点击 New Chat 清空；当前无长期记忆需求。`AiChatSession` 表保留（后续调试/持久化启用用），MVP 不写入，`/api/ai/sessions` 系列接口不实现。
 
-#### 4.3.3 对话流程
+#### 4.3.4 对话流程
 
 1. 用户在底部输入框输入消息，点击发送
 2. 前端调用 `POST /api/ai/chat-stream` 接口，传入：
@@ -519,7 +563,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 | GET | /api/ai/models | 获取可用的 LLM 模型列表（数据源 `AI_AVAILABLE_MODELS` env） |
 | GET | /api/ai/prompts | 获取 PromptTemplate 列表 |
 | PUT | /api/ai/config | 保存 CourseAiConfig |
-| GET | /api/ai/config/:courseId | 获取某 Course 的 AI 配置（apiKey 脱敏，绝不返回明文） |
+| GET | /api/ai/config/:courseId | 获取某 Course 的 AI 配置（apiKey 脱敏，绝不返回明文；含 currentReleaseTag 激活版本号用于对话头部展示） |
 | POST | /api/ai/config/:courseId/reset | 重置为默认配置 |
 
 > 对话记录接口（GET/POST/DELETE `/api/ai/sessions`）不实现（2026-10-14 拍板：对话不落库，见 §4.3.2），待长期持久化启用后再补。
@@ -722,8 +766,8 @@ JWT_SECRET="your-super-secret-jwt-key-change-in-production"
 # AI Provider 配置（首批接入 OpenRouter，OpenAI 兼容接口，2026-10-14 §12 事项 #2 拍板）
 OPENROUTER_API_KEY="sk-or-xxx"
 OPENROUTER_BASE_URL="https://openrouter.ai/api/v1"
-# 模型列表接口（GET /api/ai/models）数据源，逗号分隔；具体启用哪些模型由用户后续确认
-AI_AVAILABLE_MODELS="openai/gpt-4o-mini,anthropic/claude-3.5-sonnet"
+# 模型列表接口（GET /api/ai/models）数据源，逗号分隔；第一个为默认模型（§4.2.3）
+AI_AVAILABLE_MODELS="deepseek/deepseek-v4.1-flash,deepseek/deepseek-r1,openai/gpt-4o-mini,anthropic/claude-haiku-5.5,google/gemini-3.5-flash,qwen/qwen3.6-flash,google/gemma-4-31b-it:free,nvidia/nemotron-3-super-120b-a12b:free"
 
 # CourseAiConfig.apiKey 加密密钥（AES-256-GCM；64 位 hex 即 32 字节，2026-10-14 拍板）
 AI_CONFIG_ENCRYPTION_KEY="0000...64位hex...0000"
