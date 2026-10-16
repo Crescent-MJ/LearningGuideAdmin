@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { App, Button, Modal, Upload } from 'antd'
+import { App, Button, Modal, Upload } from '../ui'
 import { FileTextOutlined, InboxOutlined } from '@ant-design/icons'
 import {
   knowledgeApi,
@@ -8,6 +8,7 @@ import {
   type ConvertedDocument,
 } from '../../api/knowledge'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
+import { tokens } from '../../theme/tokens'
 
 /**
  * 「上传并解析」两步弹窗（§3.2.3，2026-10-15 按用户设计稿）：
@@ -99,15 +100,10 @@ export function UploadDocumentModal({
       destroyOnHidden
       width={720}
       footer={
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: tokens.spacing.sm, justifyContent: 'flex-end' }}>
           <Button onClick={close}>取消</Button>
           {step === 1 ? (
-            <Button
-              type="primary"
-              disabled={!file}
-              loading={converting}
-              onClick={goParse}
-            >
+            <Button type="primary" disabled={!file} loading={converting} onClick={goParse}>
               Next →
             </Button>
           ) : (
@@ -119,7 +115,13 @@ export function UploadDocumentModal({
       }
     >
       {target && (
-        <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>
+        <div
+          style={{
+            fontSize: tokens.fontSize.md,
+            color: tokens.color.text.tertiary,
+            marginBottom: tokens.spacing.sm,
+          }}
+        >
           目标章节：{target.lessonTitle}
         </div>
       )}
@@ -140,31 +142,35 @@ export function UploadDocumentModal({
             <p style={{ margin: '4px 0' }}>
               拖拽文件到此处，或 <em>点击选择</em>
             </p>
-            <p style={{ color: '#999', fontSize: 12, margin: 0 }}>
-              支持 {UPLOAD_ALLOWED_EXTENSIONS.map((e) =>
-                e.slice(1).toUpperCase(),
-              ).join('、')}；单次 1 个文件，≤15MB
+            <p
+              style={{
+                color: tokens.color.text.tertiary,
+                fontSize: tokens.fontSize.md,
+                margin: 0,
+              }}
+            >
+              支持 {UPLOAD_ALLOWED_EXTENSIONS.map((e) => e.slice(1).toUpperCase()).join('、')}；单次 1 个文件，≤15MB
             </p>
           </Upload.Dragger>
           {file && (
-            <p style={{ margin: '8px 0 0', color: '#1677ff' }}>
+            <p style={{ margin: `${tokens.spacing.sm}px 0 0`, color: tokens.color.primary }}>
               <FileTextOutlined /> {file.name}
             </p>
           )}
         </>
       ) : (
         <>
-          <p style={{ margin: '0 0 8px', color: '#1677ff' }}>
+          <p style={{ margin: '0 0 8px', color: tokens.color.primary }}>
             <FileTextOutlined /> {file?.name}
           </p>
           <div
             style={{
-              border: '1px dashed #91caff',
-              borderRadius: 8,
+              border: `1px dashed ${tokens.color.primaryBorder}`,
+              borderRadius: tokens.radius.md,
               maxHeight: 420,
               overflow: 'auto',
-              padding: 12,
-              background: '#fafafa',
+              padding: tokens.spacing.md,
+              background: tokens.color.bg.subtle,
             }}
           >
             <pre
@@ -172,7 +178,7 @@ export function UploadDocumentModal({
                 margin: 0,
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-all',
-                fontSize: 12,
+                fontSize: tokens.fontSize.md,
                 fontFamily: 'inherit',
               }}
             >

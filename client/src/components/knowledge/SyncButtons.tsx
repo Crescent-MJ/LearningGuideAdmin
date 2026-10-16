@@ -1,7 +1,8 @@
-import { App, Button, Space } from 'antd'
+import { App, Button, Space } from '../ui'
 import { SyncOutlined } from '@ant-design/icons'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import type { SyncSummary } from '../../api/knowledge'
+import { tokens } from '../../theme/tokens'
 
 /**
  * Sync 同步按钮（§3.2.2 外部源接管模型）：
@@ -37,7 +38,7 @@ export function SyncButtons() {
   const disabled = !selectedExternalId
 
   return (
-    <Space direction="vertical" style={{ width: '100%' }} size={4}>
+    <Space direction="vertical" style={{ width: '100%' }} size={tokens.spacing.xs}>
       <Button
         block
         type="link"
@@ -57,7 +58,7 @@ export function SyncButtons() {
         Sync Structure &amp; Course
       </Button>
       {disabled && (
-        <span style={{ fontSize: 12, color: '#999' }}>
+        <span style={{ fontSize: tokens.fontSize.md, color: tokens.color.text.tertiary }}>
           请先在上方选择同步目标
         </span>
       )}

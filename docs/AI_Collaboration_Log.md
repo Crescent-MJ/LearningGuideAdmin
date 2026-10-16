@@ -5,6 +5,31 @@
 
 ---
 
+## 2026-10-16 ｜ 细节调整第七轮：建立 Figma 设计库迁移基础设施（设计 Token + UI 封装层）
+
+- **任务**：用户有 Figma 设计库但尚未接入，评估当前前端（Ant Design 5.x 全量直接使用、100% 内联样式、硬编码颜色/间距）能否平滑迁移。经评估风险高（无组件封装层、硬编码 token 遍布 12 文件、未用 antd 主题系统），用户拍板先建立迁移基础设施，不改业务逻辑、零视觉变化。
+- **用户拍板**：
+  - 目标：建立迁移基础设施（封装层 + token），不直接接入 Figma 库
+  - 封装全部 20 个 antd 组件（非仅高频），间距/字号也 token 化
+  - token 值与既有 antd 默认值一致，零视觉变化
+- **变更清单**（仅 client/）：
+  - **新增 `theme/tokens.ts`**：颜色/间距/字号/圆角/字重单一来源（color.primary=#1677ff、spacing.xs..2xl=4/8/12/16/24/48、radius.sm/md/lg=6/8/12、fontSize.xs..2xl=10..16、fontWeight.normal/medium/semibold=400/500/600）
+  - **新增 `components/ui/` 封装层**（14 文件 + index.ts barrel）：Button/Card/Input/Select/Tag/Modal/Table/Tree/Tabs/Segmented/Avatar/Typography/Layout。业务组件一律 `import from '../ui'`，禁止直接 `import from 'antd'`。封装层纯透传 props，不强制覆盖外观（保持 antd 默认圆角等），未来替换 Figma 组件仅改本层
+  - **`App.tsx`**：ConfigProvider theme 注入与 antd 默认一致的 token（colorPrimary/success/warning/error/fontSize），**不**注入 borderRadius/colorBorder/colorText/colorTextSecondary（避免改变 antd 组件内部外观）
+  - **12 个业务组件**（layout/knowledge/ai/pages）：import 从 `'antd'` 改为 `'../ui'`；硬编码颜色（#1677ff/#f0f0f0/#52c41a/#faad14/#8c8c8c/#999/#bfbfbf 等）→ `tokens.color.*`；硬编码间距（4/8/12/16/24）→ `tokens.spacing.*`；硬编码字号/圆角/字重 → `tokens.*`
+  - **`index.css`**：新增 `:root` CSS 变量（与 tokens.ts 同步），供 BlockNote/md-editor 等第三方库覆盖；`.ai-mode-segmented` 选中色改用 CSS 变量
+  - **文档**：§6.1 项目结构更新（新增 theme/、ui/，修正 ai-tutor→ai、补充 UploadDocumentModal/ModuleNav）；新增 UI 抽象层与设计 Token 说明
+- **自测证据**：
+  - `npx tsc -b --noEmit`：0 错误
+  - `npm run build`：✓ built in 1.06s 成功（仅 chunk >500kB 警告，非失败）
+  - Grep `from 'antd'`（排除 ui/）：仅 App.tsx 2 处（ConfigProvider + locale），符合例外规则
+  - Grep 业务组件 hex 颜色：无硬编码（仅 tokens.ts / index.css 定义处）
+- **审查结论**：Review Agent 初审 REQUEST_CHANGES（3 Blocking：ConfigProvider 注入了与 antd 默认不一致的 borderRadius/colorBorder/colorText/colorTextSecondary 导致全局视觉变化；Button/Card 封装层强制 borderRadius=8）；修复后复审 **APPROVE，0 Blocking**
+- **Git**：本地 main 攒批未推送
+- **下一步**：等用户手动冒烟测试（确认视觉无变化）；Figma 设计库形态确定后，修改 tokens.ts 和 ui/ 封装层即可迁移，业务组件零改动
+
+---
+
 ## 2026-10-15 ｜ 细节调整第六轮：AI Tutor 布局改版对齐设计稿 + 版本号去秒
 
 - **任务**：用户提供 AI Tutor 设计稿，要求按设计调整 AI Tutor 板块内容（不动 Knowledge/顶部/左侧导航）：① 顶部栏显示课程标题 + Change Course 下拉 ② 左侧配置重排为 System Prompt → Welcome Message → LLM Model，底部 Reset 链接 + Unsaved changes 提示 + Save Configuration ③ 对话头部显示激活版本号 + Testing 徽章（固定）④ 输入框占位符 "Ask the tutor a question..."、Send 按钮。另：用户发现版本号含秒，确认改为 `YYYYMMDDHHmm`（去秒）

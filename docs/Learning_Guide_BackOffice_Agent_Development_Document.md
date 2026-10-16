@@ -603,32 +603,33 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 ```
 client/
 ├── src/
+│   ├── theme/
+│   │   └── tokens.ts             # 设计 Token 单一来源（颜色/间距/字号/圆角/字重）
 │   ├── components/
-│   │   ├── layout/           # 布局组件
-│   │   │   ├── Sidebar.tsx   # 左侧目录树
-│   │   │   ├── Header.tsx    # 顶部导航
+│   │   ├── layout/               # 布局组件
+│   │   │   ├── Sidebar.tsx       # 左侧目录树
+│   │   │   ├── Header.tsx        # 顶部导航
+│   │   │   ├── ModuleNav.tsx     # 模块导航列
 │   │   │   └── MainLayout.tsx
-│   │   ├── knowledge/        # Knowledge System 组件
+│   │   ├── knowledge/            # Knowledge System 组件
 │   │   │   ├── CourseTree.tsx
 │   │   │   ├── SearchBox.tsx
 │   │   │   ├── SyncButtons.tsx
 │   │   │   ├── PageEditor.tsx
 │   │   │   ├── TagManager.tsx
-│   │   │   └── PublishPanel.tsx
-│   │   ├── ai-tutor/         # AI Tutor 组件
+│   │   │   ├── PublishPanel.tsx
+│   │   │   └── UploadDocumentModal.tsx
+│   │   ├── ai/                   # AI Tutor 组件
 │   │   │   ├── ConfigPanel.tsx
-│   │   │   ├── ChatWindow.tsx
-│   │   │   ├── MessageBubble.tsx
-│   │   │   └── ModeToggle.tsx
-│   │   └── ui/               # 通用 UI 组件
+│   │   │   └── ChatWindow.tsx
+│   │   └── ui/                   # UI 封装层（Figma 迁移单一替换点；业务组件一律从此导入）
+│   │       ├── index.ts          # barrel 统一出口
+│   │       ├── Button.tsx  Card.tsx  Input.tsx  Select.tsx  Tag.tsx
+│   │       ├── Modal.tsx  Table.tsx  Tree.tsx  Tabs.tsx  Segmented.tsx
+│   │       └── Avatar.tsx  Typography.tsx  Layout.tsx
 │   ├── pages/
 │   │   ├── KnowledgeSystem.tsx   # 知识库主页
 │   │   └── AITutor.tsx           # AI Tutor 主页
-│   ├── hooks/
-│   │   ├── useCourses.ts
-│   │   ├── usePages.ts
-│   │   ├── useAI.ts
-│   │   └── useLocalStorage.ts
 │   ├── stores/
 │   │   ├── knowledgeStore.ts     # Knowledge 状态管理
 │   │   └── aiStore.ts            # AI 状态管理
@@ -636,16 +637,20 @@ client/
 │   │   ├── knowledge.ts
 │   │   ├── ai.ts
 │   │   └── client.ts             # axios 实例配置
-│   ├── utils/
-│   │   ├── markdown.ts           # Markdown 处理工具
-│   │   └── version.ts            # 版本号生成工具
-│   ├── App.tsx
+│   ├── App.tsx                   # ConfigProvider 注入 tokens 到 antd theme
+│   ├── index.css                 # 全局样式 + CSS 变量（供第三方库覆盖）
 │   └── main.tsx
 ├── package.json
 └── vite.config.ts
 ```
 
 > **Phase 4 实装注记（2026-10-14）**：本轮实装 layout/ 与 knowledge/ 组件、pages/KnowledgeSystem.tsx、api/ 与 stores/knowledgeStore.ts。`ai-tutor/` 组件与 `pages/AITutor.tsx`、`api/ai.ts`、`stores/aiStore.ts`、`hooks/useAI.ts` 属 Phase 6；`hooks/` 其余文件与 `utils/` 未建——zustand store 直接承载状态与动作（标准用法，hooks 薄包装属重复抽象），版本号生成由后端完成（§3.4.3 第 4 步），Markdown 渲染由 @uiw/react-md-editor 承担，前端无对应工具需求。dev 环境 `/api` 经 vite.config.ts 代理至后端 :3000。
+
+> **UI 抽象层与设计 Token（2026-10-16 新增，为 Figma 设计库迁移铺路）**：
+> - `theme/tokens.ts` 是颜色/间距/字号/圆角/字重的**单一事实来源**；`index.css` 的 `:root` CSS 变量与之同步，供 BlockNote / md-editor 等不读取 antd ConfigProvider 的第三方库覆盖。
+> - `components/ui/` 是 UI 组件**唯一替换点**：所有业务组件（layout/knowledge/ai/pages）一律 `import from '../ui'`，禁止直接 `import from 'antd'`。未来无论接入 Figma Code Connect、独立组件库还是仅替换 token，都只需修改 `ui/` 与 `tokens.ts`，业务组件零改动。
+> - `App.tsx` 通过 `ConfigProvider theme` 注入与 antd 默认值一致的 token（colorPrimary/success/warning/error/fontSize），确保零视觉变化；业务组件自身的边框/文字/圆角通过 `tokens.*` 内联样式控制。未来接入 Figma 设计库时可在此扩展注入范围。
+> - 当前 token 值与既有 antd 默认值完全一致，**零视觉变化**。
 
 ### 6.2 状态管理策略
 

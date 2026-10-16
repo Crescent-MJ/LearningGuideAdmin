@@ -1,5 +1,6 @@
-import { Input } from 'antd'
+import { Input } from '../ui'
 import { SearchOutlined } from '@ant-design/icons'
+import { tokens } from '../../theme/tokens'
 
 interface SearchBoxProps {
   value: string
@@ -15,7 +16,7 @@ export function SearchBox({ value, onChange }: SearchBoxProps) {
       placeholder="搜索页面标题…"
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      style={{ marginBottom: 8 }}
+      style={{ marginBottom: tokens.spacing.sm }}
     />
   )
 }

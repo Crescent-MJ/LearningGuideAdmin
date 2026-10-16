@@ -1,5 +1,6 @@
-import { Avatar, Layout, Typography } from 'antd'
+import { Avatar, Layout, Typography } from '../ui'
 import { BellOutlined, BookOutlined } from '@ant-design/icons'
+import { tokens } from '../../theme/tokens'
 
 const { Header } = Layout
 
@@ -13,10 +14,10 @@ export function AppHeader() {
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 12,
-        background: '#fff',
-        borderBottom: '1px solid #f0f0f0',
-        padding: '0 24px',
+        gap: tokens.spacing.md,
+        background: tokens.color.bg.container,
+        borderBottom: `1px solid ${tokens.color.border}`,
+        padding: `0 ${tokens.spacing.xl}px`,
         height: 56,
         lineHeight: '56px',
       }}
@@ -25,30 +26,38 @@ export function AppHeader() {
         style={{
           width: 32,
           height: 32,
-          borderRadius: 8,
-          background: '#1677ff',
+          borderRadius: tokens.radius.md,
+          background: tokens.color.primary,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           flexShrink: 0,
         }}
       >
-        <BookOutlined style={{ color: '#fff', fontSize: 16 }} />
+        <BookOutlined style={{ color: tokens.color.bg.container, fontSize: tokens.fontSize['2xl'] }} />
       </div>
-      <Typography.Text strong style={{ fontSize: 16 }}>
+      <Typography.Text strong style={{ fontSize: tokens.fontSize['2xl'] }}>
         Learning Guide BackOffice
       </Typography.Text>
       <div style={{ flex: 1 }} />
-      <BellOutlined style={{ fontSize: 16, color: '#666' }} />
+      <BellOutlined style={{ fontSize: tokens.fontSize['2xl'], color: tokens.color.text.icon }} />
       <Avatar
         size={30}
-        style={{ background: '#1677ff', fontSize: 14, marginLeft: 12 }}
+        style={{
+          background: tokens.color.primary,
+          fontSize: tokens.fontSize.lg,
+          marginLeft: tokens.spacing.md,
+        }}
       >
         J
       </Avatar>
       <div style={{ lineHeight: 1.2 }}>
-        <div style={{ fontSize: 13, fontWeight: 600 }}>Jack</div>
-        <div style={{ fontSize: 11, color: '#999' }}>Admin</div>
+        <div style={{ fontSize: tokens.fontSize.lg, fontWeight: tokens.fontWeight.semibold }}>
+          Jack
+        </div>
+        <div style={{ fontSize: tokens.fontSize.md, color: tokens.color.text.tertiary }}>
+          Admin
+        </div>
       </div>
     </Header>
   )

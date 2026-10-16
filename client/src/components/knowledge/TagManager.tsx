@@ -1,6 +1,7 @@
-import { Tag, Input, Button, Space } from 'antd'
+import { Tag, Input, Button, Space } from '../ui'
 import { PlusOutlined } from '@ant-design/icons'
 import { useState } from 'react'
+import { TAG_PRESET_COLORS } from '../ui'
 
 interface TagManagerProps {
   tags: string[]
@@ -9,14 +10,8 @@ interface TagManagerProps {
 
 /**
  * Tags 管理（§3.3.3）：JSON 数组存储，动态增删，antd Tag 样式。
+ * 预设配色集中于 ui/Tag.tsx 的 TAG_PRESET_COLORS（2026-10-16 迁移）。
  */
-const TAG_COLORS: Record<string, string> = {
-  'Core Knowledge': 'blue',
-  'Teaching Guidance': 'green',
-  Misconception: 'orange',
-  Assessment: 'purple',
-}
-
 export function TagManager({ tags, onChange }: TagManagerProps) {
   const [adding, setAdding] = useState(false)
   const [value, setValue] = useState('')
@@ -35,8 +30,7 @@ export function TagManager({ tags, onChange }: TagManagerProps) {
       {tags.map((tag) => (
         <Tag
           key={tag}
-          // 预设标签按设计稿配色（2026-10-14）：蓝/绿/橙/紫，其余默认
-          color={TAG_COLORS[tag]}
+          color={TAG_PRESET_COLORS[tag]}
           closable
           onClose={() => onChange(tags.filter((t) => t !== tag))}
         >
@@ -54,12 +48,7 @@ export function TagManager({ tags, onChange }: TagManagerProps) {
           onPressEnter={commit}
         />
       ) : (
-        <Button
-          size="small"
-          type="dashed"
-          icon={<PlusOutlined />}
-          onClick={() => setAdding(true)}
-        >
+        <Button size="small" type="dashed" icon={<PlusOutlined />} onClick={() => setAdding(true)}>
           标签
         </Button>
       )}

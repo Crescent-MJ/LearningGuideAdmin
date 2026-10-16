@@ -1,10 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, Avatar, Button, Card, Empty, Input, Segmented, Space, Spin, Tag } from 'antd'
+import {
+  Alert,
+  Avatar,
+  Button,
+  Card,
+  Empty,
+  Input,
+  Segmented,
+  Space,
+  Spin,
+  Tag,
+} from '../ui'
 import { PlusOutlined, RobotOutlined, SendOutlined, UserOutlined } from '@ant-design/icons'
 import MDEditor from '@uiw/react-md-editor'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { useAiStore, type ChatMessage } from '../../stores/aiStore'
+import { tokens } from '../../theme/tokens'
 
 const katexPlugins = {
   remarkPlugins: [remarkMath],
@@ -24,23 +36,23 @@ function Bubble({ msg }: { msg: ChatMessage }) {
         display: 'flex',
         flexDirection: isUser ? 'row-reverse' : 'row',
         alignItems: 'flex-start',
-        gap: 8,
+        gap: tokens.spacing.sm,
       }}
     >
       <Avatar
         icon={isUser ? USER_AVATAR : AI_AVATAR}
         style={{
-          backgroundColor: isUser ? '#1677ff' : '#52c41a',
+          backgroundColor: isUser ? tokens.color.primary : tokens.color.success,
           flexShrink: 0,
         }}
       />
       <div
         style={{
           maxWidth: '75%',
-          background: isUser ? '#1677ff' : '#f5f5f5',
-          color: isUser ? '#fff' : 'inherit',
-          padding: '8px 12px',
-          borderRadius: 8,
+          background: isUser ? tokens.color.primary : tokens.color.bg.layout,
+          color: isUser ? tokens.color.bg.container : 'inherit',
+          padding: `${tokens.spacing.sm}px ${tokens.spacing.md}px`,
+          borderRadius: tokens.radius.md,
           whiteSpace: isUser ? 'pre-wrap' : 'normal',
         }}
       >
@@ -49,7 +61,7 @@ function Bubble({ msg }: { msg: ChatMessage }) {
             <MDEditor.Markdown
               source={msg.content}
               {...katexPlugins}
-              style={{ background: 'transparent', fontSize: 14 }}
+              style={{ background: 'transparent', fontSize: tokens.fontSize.xl }}
             />
           </div>
         ) : (
@@ -97,7 +109,7 @@ export function ChatWindow() {
         <Space size="middle" style={{ width: '100%', justifyContent: 'space-between' }}>
           {/* 左侧：激活版本号 + Testing 徽章（§4.3.1） */}
           <Space>
-            <span style={{ fontSize: 14 }}>{currentReleaseTag ?? '未发布'}</span>
+            <span style={{ fontSize: tokens.fontSize.xl }}>{currentReleaseTag ?? '未发布'}</span>
             <Tag color="green">Testing</Tag>
           </Space>
           {/* 中间：模式切换（蓝色高亮选中项） */}
@@ -118,7 +130,13 @@ export function ChatWindow() {
       }
     >
       {error && (
-        <Alert type="error" message={error} showIcon closable style={{ marginBottom: 8 }} />
+        <Alert
+          type="error"
+          message={error}
+          showIcon
+          closable
+          style={{ marginBottom: tokens.spacing.sm }}
+        />
       )}
       <div
         ref={listRef}
@@ -127,8 +145,8 @@ export function ChatWindow() {
           overflow: 'auto',
           display: 'flex',
           flexDirection: 'column',
-          gap: 12,
-          padding: '4px 0',
+          gap: tokens.spacing.md,
+          padding: `${tokens.spacing.xs}px 0`,
         }}
       >
         {messages.length === 0 ? (
@@ -137,7 +155,7 @@ export function ChatWindow() {
           messages.map((m, i) => <Bubble key={`${m.createdAt}-${i}`} msg={m} />)
         )}
       </div>
-      <Space.Compact style={{ marginTop: 12, width: '100%' }}>
+      <Space.Compact style={{ marginTop: tokens.spacing.md, width: '100%' }}>
         <Input.TextArea
           value={input}
           autoSize={{ minRows: 1, maxRows: 4 }}

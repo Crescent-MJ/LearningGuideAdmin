@@ -1,4 +1,5 @@
 import { ReadOutlined, RobotOutlined } from '@ant-design/icons'
+import { tokens } from '../../theme/tokens'
 
 export type ModuleKey = 'knowledge' | 'ai-tutor'
 
@@ -23,12 +24,12 @@ export function ModuleNav({
       style={{
         width: 160,
         flexShrink: 0,
-        background: '#fff',
-        borderRight: '1px solid #f0f0f0',
-        padding: '12px 8px',
+        background: tokens.color.bg.container,
+        borderRight: `1px solid ${tokens.color.border}`,
+        padding: `${tokens.spacing.md}px ${tokens.spacing.sm}px`,
         display: 'flex',
         flexDirection: 'column',
-        gap: 4,
+        gap: tokens.spacing.xs,
       }}
     >
       {ITEMS.map((item) => {
@@ -40,16 +41,16 @@ export function ModuleNav({
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: 8,
-              padding: '8px 12px',
-              fontSize: 14,
+              gap: tokens.spacing.sm,
+              padding: `${tokens.spacing.sm}px ${tokens.spacing.md}px`,
+              fontSize: tokens.fontSize.xl,
               border: 'none',
-              borderRadius: 8,
+              borderRadius: tokens.radius.md,
               cursor: 'pointer',
               textAlign: 'left',
-              background: isActive ? '#e6f4ff' : 'transparent',
-              color: isActive ? '#1677ff' : '#333',
-              fontWeight: isActive ? 600 : 400,
+              background: isActive ? tokens.color.primaryBg : 'transparent',
+              color: isActive ? tokens.color.primary : tokens.color.text.primary,
+              fontWeight: isActive ? tokens.fontWeight.semibold : tokens.fontWeight.normal,
             }}
           >
             {item.icon}

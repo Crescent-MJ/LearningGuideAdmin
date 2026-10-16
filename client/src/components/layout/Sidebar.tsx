@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Select, Tag, Typography } from 'antd'
+import { Select, Tag, Typography } from '../ui'
 import { SearchBox } from '../knowledge/SearchBox'
 import { CourseTree } from '../knowledge/CourseTree'
 import { SyncButtons } from '../knowledge/SyncButtons'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import type { ExternalCourseStatus } from '../../api/knowledge'
+import { tokens } from '../../theme/tokens'
 
 const STATUS_META: Record<
   ExternalCourseStatus['status'],
@@ -34,13 +35,20 @@ export function Sidebar() {
   }, [loadExternalCourses])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: 12 }}>
-      <div style={{ marginBottom: 8 }}>
-        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        padding: tokens.spacing.md,
+      }}
+    >
+      <div style={{ marginBottom: tokens.spacing.sm }}>
+        <Typography.Text type="secondary" style={{ fontSize: tokens.fontSize.md }}>
           同步目标（外部源课程）
         </Typography.Text>
         <Select
-          style={{ width: '100%', marginTop: 4 }}
+          style={{ width: '100%', marginTop: tokens.spacing.xs }}
           placeholder="选择外部课程作为同步目标"
           value={selectedExternalId ?? undefined}
           onSelect={(v: string) => void selectExternal(v)}
@@ -52,17 +60,22 @@ export function Sidebar() {
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  gap: 8,
+                  gap: tokens.spacing.sm,
                   width: '100%',
                 }}
               >
-                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
                   {e.title}
                 </span>
-                <Tag
-                  color={STATUS_META[e.status].color}
-                  style={{ marginInlineEnd: 0, flexShrink: 0 }}
-                >
+                <Tag color={STATUS_META[e.status].color} style={{ marginInlineEnd: 0, flexShrink: 0 }}>
                   {STATUS_META[e.status].label}
                 </Tag>
               </span>
@@ -71,10 +84,10 @@ export function Sidebar() {
         />
       </div>
       <SearchBox value={keyword} onChange={setKeyword} />
-      <div style={{ flex: 1, overflow: 'auto', marginTop: 8 }}>
+      <div style={{ flex: 1, overflow: 'auto', marginTop: tokens.spacing.sm }}>
         <CourseTree keyword={keyword} />
       </div>
-      <div style={{ marginTop: 8 }}>
+      <div style={{ marginTop: tokens.spacing.sm }}>
         <SyncButtons />
       </div>
     </div>

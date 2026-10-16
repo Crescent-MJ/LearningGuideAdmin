@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
-import { Alert, App, Dropdown, Empty, Input, Tag } from 'antd'
-import type { MenuProps } from 'antd'
+import { Alert, App, Dropdown, Empty, Input, Tag } from '../ui'
+import type { MenuProps } from '../ui'
 import {
   BlockNoteView,
 } from '@blocknote/mantine'
@@ -33,6 +33,7 @@ import {
 } from '@ant-design/icons'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import { TagManager } from './TagManager'
+import { tokens } from '../../theme/tokens'
 
 /**
  * Page 编辑器（§3.3.2，2026-10-15 改：BlockNote 块编辑器）
@@ -393,23 +394,25 @@ export function PageEditor() {
       <div
         style={{
           display: 'flex',
-          gap: 12,
+          gap: tokens.spacing.md,
           alignItems: 'center',
-          marginBottom: 8,
+          marginBottom: tokens.spacing.sm,
           flexWrap: 'wrap',
         }}
       >
         <Input
           variant="filled"
-          style={{ flex: 1, minWidth: 200, fontSize: 16, fontWeight: 600 }}
+          style={{
+            flex: 1,
+            minWidth: 200,
+            fontSize: tokens.fontSize['2xl'],
+            fontWeight: tokens.fontWeight.semibold,
+          }}
           value={draft.title}
           onChange={(e) => editDraft({ title: e.target.value })}
           placeholder="页面标题"
         />
-        <TagManager
-          tags={draft.tags}
-          onChange={(tags) => editDraft({ tags })}
-        />
+        <TagManager tags={draft.tags} onChange={(tags) => editDraft({ tags })} />
         {save.text && <Tag color={save.color}>{save.text}</Tag>}
       </div>
       {draft.saveState === 'error' && (
@@ -417,7 +420,7 @@ export function PageEditor() {
           type="error"
           showIcon
           message="自动保存失败，请检查后端服务后重试（修改仍保留在本地）"
-          style={{ marginBottom: 8 }}
+          style={{ marginBottom: tokens.spacing.sm }}
         />
       )}
       <div
@@ -426,10 +429,10 @@ export function PageEditor() {
           flex: 1,
           minHeight: 0,
           overflow: 'auto',
-          border: '1px solid #f0f0f0',
-          borderRadius: 6,
+          border: `1px solid ${tokens.color.border}`,
+          borderRadius: tokens.radius.sm,
           // 左侧留出 sideMenu（拖拽手柄+添加按钮）空间，防止被裁剪
-          paddingLeft: 48,
+          paddingLeft: tokens.spacing['2xl'],
         }}
       >
         <Dropdown

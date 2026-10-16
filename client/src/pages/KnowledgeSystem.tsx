@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Tabs } from 'antd'
+import { Tabs } from '../components/ui'
 import { PageEditor } from '../components/knowledge/PageEditor'
 import { PublishPanel } from '../components/knowledge/PublishPanel'
 import { useKnowledgeStore } from '../stores/knowledgeStore'
+import { tokens } from '../theme/tokens'
 
 /**
  * 知识库主页右侧内容区（§3.1）：
@@ -21,7 +22,7 @@ export function KnowledgeSystem() {
       activeKey={tab}
       onChange={setTab}
       style={{ height: '100%' }}
-      tabBarStyle={{ marginBottom: 8 }}
+      tabBarStyle={{ marginBottom: tokens.spacing.sm }}
       items={[
         {
           key: 'pages',

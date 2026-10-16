@@ -1,3 +1,37 @@
+/* 设计 Token CSS 变量（2026-10-16 新增，与 theme/tokens.ts 保持同步）
+   供 BlockNote / md-editor 等不读取 Ant Design ConfigProvider 的第三方库覆盖用。
+   修改请同步 tokens.ts。 */
+:root {
+  --color-primary: #1677ff;
+  --color-primary-bg: #e6f4ff;
+  --color-primary-border: #91caff;
+  --color-success: #52c41a;
+  --color-warning: #faad14;
+  --color-error: #ff4d4f;
+  --color-text-primary: #333;
+  --color-text-secondary: #8c8c8c;
+  --color-text-tertiary: #999;
+  --color-text-disabled: #bfbfbf;
+  --color-border: #f0f0f0;
+  --color-bg-container: #fff;
+  --color-bg-layout: #f5f5f5;
+  --color-bg-subtle: #fafafa;
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 12px;
+  --spacing-lg: 16px;
+  --spacing-xl: 24px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --font-size-xs: 10px;
+  --font-size-sm: 11px;
+  --font-size-md: 12px;
+  --font-size-lg: 13px;
+  --font-size-xl: 14px;
+  --font-size-2xl: 16px;
+}
+
 /* 全局基础样式：布局由 antd Layout 承担（§3.1），此处仅重置根节点 */
 html,
 body,
@@ -34,9 +68,9 @@ body,
 
 /* AI Tutor 模式切换 Segmented：选中项蓝色高亮 */
 .ai-mode-segmented .ant-segmented-item-selected {
-  background-color: #1677ff !important;
-  color: #fff !important;
+  background-color: var(--color-primary) !important;
+  color: var(--color-bg-container) !important;
 }
 .ai-mode-segmented .ant-segmented-item-selected .ant-segmented-item-label {
-  color: #fff !important;
+  color: var(--color-bg-container) !important;
 }

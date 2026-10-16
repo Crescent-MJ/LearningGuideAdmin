@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { App, Dropdown, Tree, Modal, Input, Tooltip, Empty } from 'antd'
-import type { TreeDataNode } from 'antd'
+import { App, Dropdown, Tree, Modal, Input, Tooltip, Empty } from '../ui'
+import type { TreeDataNode } from '../ui'
 import {
   BookOutlined,
   FileTextOutlined,
@@ -10,6 +10,7 @@ import {
 } from '@ant-design/icons'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import { UploadDocumentModal } from './UploadDocumentModal'
+import { tokens } from '../../theme/tokens'
 
 /**
  * 三级课程目录树（§3.2.1；2026-10-15 改）：Course → Lesson → Page。
@@ -259,7 +260,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
 
   if (!selectedExternalId) {
     return (
-      <span style={{ fontSize: 12, color: '#999' }}>
+      <span style={{ fontSize: tokens.fontSize.md, color: tokens.color.text.tertiary }}>
         请在上方选择同步目标
       </span>
     )
@@ -269,7 +270,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
       <Empty
         image={Empty.PRESENTED_IMAGE_SIMPLE}
         description={
-          <span style={{ fontSize: 12 }}>
+          <span style={{ fontSize: tokens.fontSize.md }}>
             该课程尚未同步，点击下方 Sync 拉取
           </span>
         }
@@ -304,20 +305,36 @@ export function CourseTree({ keyword }: { keyword: string }) {
                 : undefined
             return (
               <div
-                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
                 onClick={onRowClick}
               >
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <span
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: tokens.spacing.xs + 2,
+                    minWidth: 0,
+                  }}
+                >
                   {isCourse ? (
-                    <BookOutlined style={{ color: '#1677ff' }} />
+                    <BookOutlined style={{ color: tokens.color.primary }} />
                   ) : isLesson ? (
-                    <FolderOutlined style={{ color: '#faad14' }} />
+                    <FolderOutlined style={{ color: tokens.color.warning }} />
                   ) : (
-                    <FileTextOutlined style={{ color: '#8c8c8c' }} />
+                    <FileTextOutlined style={{ color: tokens.color.text.secondary }} />
                   )}
                   {stale ? (
                     <Tooltip title="该节点与外部源不同步，不会作为 AI Tutor 知识库使用；内容已失效，可自行复制所需内容后删除">
-                      <span style={{ color: '#bfbfbf', fontStyle: 'italic' }}>
+                      <span
+                        style={{
+                          color: tokens.color.text.disabled,
+                          fontStyle: 'italic',
+                        }}
+                      >
                         {node.title as string}
                       </span>
                     </Tooltip>
@@ -333,12 +350,12 @@ export function CourseTree({ keyword }: { keyword: string }) {
                     </span>
                   )}
                 </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: tokens.spacing.xs }}>
                   {(isCourse || isLesson) && (
                     <RightOutlined
                       style={{
-                        fontSize: 10,
-                        color: '#999',
+                        fontSize: tokens.fontSize.xs,
+                        color: tokens.color.text.tertiary,
                         transition: 'transform 0.2s',
                         transform: expanded ? 'rotate(90deg)' : 'none',
                       }}
@@ -348,7 +365,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
                     <Dropdown menu={menuFor(node)!} trigger={['click']}>
                       <MoreOutlined
                         onClick={(e) => e.stopPropagation()}
-                        style={{ padding: '0 4px' }}
+                        style={{ padding: `0 ${tokens.spacing.xs}px` }}
                       />
                     </Dropdown>
                   )}

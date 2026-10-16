@@ -1,8 +1,9 @@
 import { useEffect } from 'react'
-import { Select, Typography } from 'antd'
+import { Select, Typography } from '../components/ui'
 import { ConfigPanel } from '../components/ai/ConfigPanel'
 import { ChatWindow } from '../components/ai/ChatWindow'
 import { useAiStore } from '../stores/aiStore'
+import { tokens } from '../theme/tokens'
 
 const { Title } = Typography
 
@@ -22,7 +23,14 @@ export function AITutor() {
   }, [init])
 
   return (
-    <div style={{ height: 'calc(100vh - 140px)', display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div
+      style={{
+        height: 'calc(100vh - 140px)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: tokens.spacing.md,
+      }}
+    >
       {/* 顶部栏：课程标题 + Change Course（§4.1） */}
       <div
         style={{
@@ -45,7 +53,7 @@ export function AITutor() {
         />
       </div>
       {/* 主体：左配置 + 右对话 */}
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: 12 }}>
+      <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: tokens.spacing.md }}>
         <div style={{ width: 340, flexShrink: 0 }}>
           <ConfigPanel />
         </div>

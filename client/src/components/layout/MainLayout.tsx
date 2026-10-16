@@ -1,6 +1,7 @@
-import { Layout } from 'antd'
+import { Layout } from '../ui'
 import { AppHeader } from './Header'
 import { ModuleNav, type ModuleKey } from './ModuleNav'
+import { tokens } from '../../theme/tokens'
 
 const { Sider, Content } = Layout
 
@@ -31,13 +32,20 @@ export function MainLayout({
           <Sider
             width={300}
             theme="light"
-            style={{ borderRight: '1px solid #f0f0f0', overflow: 'hidden' }}
+            style={{
+              borderRight: `1px solid ${tokens.color.border}`,
+              overflow: 'hidden',
+            }}
           >
             {sidebar}
           </Sider>
         )}
         <Content
-          style={{ padding: 16, overflow: 'hidden', background: '#fff' }}
+          style={{
+            padding: tokens.spacing.lg,
+            overflow: 'hidden',
+            background: tokens.color.bg.container,
+          }}
         >
           {children}
         </Content>

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { App, Button, Input, Modal, Table, Tag, Typography } from 'antd'
-import type { ColumnsType } from 'antd/es/table'
+import { App, Button, Input, Modal, Table, Tag, Typography } from '../ui'
+import type { ColumnsType } from '../ui'
 import { knowledgeApi, type ReleaseSummary } from '../../api/knowledge'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
+import { tokens } from '../../theme/tokens'
 
 /**
  * Publish 版本发布面板（§3.4；2026-10-15 激活版本模型）：
@@ -133,7 +134,7 @@ export function PublishPanel() {
           <Typography.Text type="secondary">暂无发布记录</Typography.Text>
         ) : (
           historyList.map((r) => (
-            <div key={r.id} style={{ marginBottom: 12 }}>
+            <div key={r.id} style={{ marginBottom: tokens.spacing.md }}>
               <Tag color={r.isActive ? 'green' : 'geekblue'}>{r.versionTag}</Tag>
               {r.isActive && <Tag color="green">激活中</Tag>}
               <Typography.Text type="secondary">
@@ -142,7 +143,7 @@ export function PublishPanel() {
               {!r.isActive && historyCourse && (
                 <Button
                   size="small"
-                  style={{ marginLeft: 8 }}
+                  style={{ marginLeft: tokens.spacing.sm }}
                   onClick={() => doActivate(historyCourse, r)}
                 >
                   切换到此版本

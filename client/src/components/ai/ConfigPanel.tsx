@@ -1,5 +1,6 @@
-import { App, Button, Card, Input, Popconfirm, Select, Space, Typography } from 'antd'
+import { App, Button, Card, Input, Popconfirm, Select, Space, Typography } from '../ui'
 import { useAiStore } from '../../stores/aiStore'
+import { tokens } from '../../theme/tokens'
 
 const { Text } = Typography
 
@@ -10,15 +11,15 @@ const sectionStyle: React.CSSProperties = {
   minHeight: 0,
 }
 const labelStyle: React.CSSProperties = {
-  fontSize: 14,
-  fontWeight: 500,
-  marginBottom: 4,
+  fontSize: tokens.fontSize.xl,
+  fontWeight: tokens.fontWeight.medium,
+  marginBottom: tokens.spacing.xs,
   flexShrink: 0,
 }
 const extraStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: '#8c8c8c',
-  marginTop: 4,
+  fontSize: tokens.fontSize.md,
+  color: tokens.color.text.secondary,
+  marginTop: tokens.spacing.xs,
   flexShrink: 0,
 }
 
@@ -67,7 +68,7 @@ export function ConfigPanel() {
         body: {
           flex: 1,
           minHeight: 0,
-          padding: 12,
+          padding: tokens.spacing.md,
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -75,7 +76,7 @@ export function ConfigPanel() {
       }}
     >
       {/* System Prompt：占剩余空间的 70%，超出文本框可滚动 */}
-      <div style={{ ...sectionStyle, flex: '7 1 0', marginBottom: 12 }}>
+      <div style={{ ...sectionStyle, flex: '7 1 0', marginBottom: tokens.spacing.md }}>
         <div style={labelStyle}>System Prompt</div>
         <Input.TextArea
           value={form.systemPrompt}
@@ -91,7 +92,7 @@ export function ConfigPanel() {
       </div>
 
       {/* Welcome Message：占剩余空间的 30%，超出可滚动 */}
-      <div style={{ ...sectionStyle, flex: '3 1 0', marginBottom: 12 }}>
+      <div style={{ ...sectionStyle, flex: '3 1 0', marginBottom: tokens.spacing.md }}>
         <div style={labelStyle}>Welcome Message</div>
         <Input.TextArea
           value={form.welcomeMsg}
@@ -101,7 +102,7 @@ export function ConfigPanel() {
       </div>
 
       {/* LLM Model：自然高度，不参与比例分配 */}
-      <div style={{ ...sectionStyle, flex: '0 0 auto', marginBottom: 12 }}>
+      <div style={{ ...sectionStyle, flex: '0 0 auto', marginBottom: tokens.spacing.md }}>
         <div style={labelStyle}>LLM Model</div>
         <Select
           value={form.llmModel || undefined}
@@ -119,8 +120,8 @@ export function ConfigPanel() {
           alignItems: 'center',
           justifyContent: 'space-between',
           flexShrink: 0,
-          paddingTop: 8,
-          borderTop: '1px solid #f0f0f0',
+          paddingTop: tokens.spacing.sm,
+          borderTop: `1px solid ${tokens.color.border}`,
         }}
       >
         <Popconfirm
