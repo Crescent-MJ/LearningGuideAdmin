@@ -2,20 +2,21 @@
    供 BlockNote / md-editor 等不读取 Ant Design ConfigProvider 的第三方库覆盖用。
    修改请同步 tokens.ts。 */
 :root {
-  --color-primary: #1677ff;
-  --color-primary-bg: #e6f4ff;
-  --color-primary-border: #91caff;
+  --color-primary: #1D6BFF;
+  --color-primary-dark: #145CFF;
+  --color-primary-bg: #E8F0FF;
+  --color-primary-border: #B8CCFF;
   --color-success: #52c41a;
   --color-warning: #faad14;
   --color-error: #ff4d4f;
-  --color-text-primary: #333;
-  --color-text-secondary: #8c8c8c;
-  --color-text-tertiary: #999;
-  --color-text-disabled: #bfbfbf;
-  --color-border: #f0f0f0;
+  --color-text-primary: #1E293B;
+  --color-text-secondary: #64748b;
+  --color-text-tertiary: #94a3b8;
+  --color-text-disabled: #cbd5e1;
+  --color-border: #E8EDF5;
   --color-bg-container: #fff;
-  --color-bg-layout: #f5f5f5;
-  --color-bg-subtle: #fafafa;
+  --color-bg-layout: #F8FAFC;
+  --color-bg-subtle: #E8EBED;
   --spacing-xs: 4px;
   --spacing-sm: 8px;
   --spacing-md: 12px;
@@ -30,6 +31,9 @@
   --font-size-lg: 13px;
   --font-size-xl: 14px;
   --font-size-2xl: 16px;
+  --font-size-3xl: 20px;
+  --shadow-card: 0px 1px 2px -1px rgba(0, 0, 0, 0.1), 0px 1px 3px 0px rgba(0, 0, 0, 0.1);
+  --shadow-floating: 0px 4px 16px 0px rgba(0, 0, 0, 0.08), 0px 1px 4px 0px rgba(0, 0, 0, 0.04);
 }
 
 /* 全局基础样式：布局由 antd Layout 承担（§3.1），此处仅重置根节点 */
@@ -48,6 +52,25 @@ body,
 
 .course-tree-no-switcher .ant-tree-indent-unit {
   width: 16px;
+}
+
+/* Page 节点拖拽把手（§3.2.1，2026-10-19）：悬停时行左侧显示，按住把手拖动排序 */
+.course-tree-no-switcher .page-drag-handle {
+  opacity: 0;
+  cursor: grab;
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-tertiary);
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+.course-tree-no-switcher .page-drag-handle:hover {
+  color: var(--color-primary);
+}
+.course-tree-no-switcher .page-drag-handle:active {
+  cursor: grabbing;
+}
+.course-tree-no-switcher .ant-tree-node-content-wrapper:hover .page-drag-handle {
+  opacity: 1;
 }
 
 /* BlockNote 编辑器浮层（选中格式化工具栏、链接工具栏等）确保不被裁剪且层级最高 */

@@ -4,17 +4,20 @@ import zhCN from 'antd/locale/zh_CN'
 import { MainLayout } from './components/layout/MainLayout'
 import type { ModuleKey } from './components/layout/ModuleNav'
 import { Sidebar } from './components/layout/Sidebar'
+import {
+  KnowledgeTabBar,
+  type KnowledgeTabKey,
+} from './components/knowledge/KnowledgeTabBar'
 import { KnowledgeSystem } from './pages/KnowledgeSystem'
 import { AITutor } from './pages/AITutor'
 import { tokens } from './theme/tokens'
 
 /**
- * 全局主题（2026-10-16 新增）：
- * 将设计 token 注入 Ant Design ConfigProvider。
- * 注意：仅注入与 antd v5 默认值一致的 token，避免改变 antd 组件内部外观（零视觉变化）。
- * antd 内部使用的 borderRadius(6)/colorBorder(#d9d9d9)/colorText(rgba 0.88)/colorTextSecondary(rgba 0.65)
- * 保持默认；业务组件自身的边框/文字/圆角通过 tokens.* 内联样式控制。
- * 未来接入 Figma 设计库时，可在此处扩展注入范围。
+ * 全局主题（对齐 Figma 设计库 2026-10-16；内容面板统一 2026-10-19）：
+ * 将设计 token 注入 Ant Design ConfigProvider，使 antd 组件（按钮/输入框/标签等）
+ * 自动使用 Figma 配色（主色 #1D6BFF、边框 #E8EDF5、基础圆角 8px）。
+ * `borderRadiusLG=12`：Card/Modal 等大容器圆角对齐 Figma 主内容面板（12px）。
+ * `components.Input/Select`：输入类描边 #E2E8F0、底色 #FAFBFC，对齐 Figma 输入控件规格。
  */
 const themeConfig = {
   token: {
@@ -22,12 +25,29 @@ const themeConfig = {
     colorSuccess: tokens.color.success,
     colorWarning: tokens.color.warning,
     colorError: tokens.color.error,
+    colorBorder: tokens.color.border,
+    colorBorderSecondary: tokens.color.border,
+    borderRadius: tokens.radius.md,
+    borderRadiusLG: tokens.radius.lg,
     fontSize: tokens.fontSize.xl,
+  },
+  components: {
+    // 输入类（输入框 / 文本域）：描边 #E2E8F0、底色 #FAFBFC（Figma 输入控件规格）
+    Input: {
+      colorBorder: tokens.color.inputBorder,
+      colorBgContainer: tokens.color.inputBg,
+    },
+    // 下拉选择（输入类同类控件）：同样对齐 Figma 描边与底色
+    Select: {
+      colorBorder: tokens.color.inputBorder,
+      colorBgContainer: tokens.color.inputBg,
+    },
   },
 }
 
 function App() {
   const [activeModule, setActiveModule] = useState<ModuleKey>('knowledge')
+  const [knowledgeTab, setKnowledgeTab] = useState<KnowledgeTabKey>('pages')
 
   return (
     <ConfigProvider locale={zhCN} theme={themeConfig}>
@@ -36,9 +56,21 @@ function App() {
         <MainLayout
           activeModule={activeModule}
           onModuleChange={setActiveModule}
-          sidebar={activeModule === 'knowledge' ? <Sidebar /> : undefined}
+          topBar={
+            activeModule === 'knowledge' ? (
+              <KnowledgeTabBar active={knowledgeTab} onChange={setKnowledgeTab} />
+            ) : undefined
+          }
+          sidebar={
+            // 课程树边栏仅在 "Knowledge Pages" Tab 显示；"Releases" Tab 下隐藏（保留最左侧模块导航列）
+            activeModule === 'knowledge' && knowledgeTab === 'pages' ? <Sidebar /> : undefined
+          }
         >
-          {activeModule === 'knowledge' ? <KnowledgeSystem /> : <AITutor />}
+          {activeModule === 'knowledge' ? (
+            <KnowledgeSystem tab={knowledgeTab} />
+          ) : (
+            <AITutor />
+          )}
         </MainLayout>
       </AntApp>
     </ConfigProvider>

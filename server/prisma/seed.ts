@@ -52,6 +52,21 @@ async function main() {
       isDefault: true,
     },
   });
+
+  // 3. 预设 Tag 词库（§3.3.3 方案 B：4 个语义标签带预设色，其余由用户输入自动沉淀）
+  const presetTags = [
+    { name: 'Core Knowledge', color: 'blue' },
+    { name: 'Teaching Guidance', color: 'green' },
+    { name: 'Misconception', color: 'orange' },
+    { name: 'Assessment', color: 'purple' },
+  ];
+  for (const t of presetTags) {
+    await prisma.tag.upsert({
+      where: { name: t.name },
+      update: { color: t.color },
+      create: t,
+    });
+  }
 }
 
 main()

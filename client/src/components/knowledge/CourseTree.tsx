@@ -2,25 +2,40 @@ import { useEffect, useMemo, useState } from 'react'
 import { App, Dropdown, Tree, Modal, Input, Tooltip, Empty } from '../ui'
 import type { TreeDataNode } from '../ui'
 import {
-  BookOutlined,
-  FileTextOutlined,
-  FolderOutlined,
+  HolderOutlined,
   MoreOutlined,
   RightOutlined,
 } from '@ant-design/icons'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import { UploadDocumentModal } from './UploadDocumentModal'
 import { tokens } from '../../theme/tokens'
+import { PageFileIcon } from '../icons'
+
+/** heading 信息：层级(1-6) + 文本 */
+interface HeadingInfo {
+  level: number
+  text: string
+}
+
+/** 解析 markdown 提取 H1-H6（用于 TOC，2026-10-19 由 H1/H2/H3 扩展） */
+function parseHeadings(contentMd: string): HeadingInfo[] {
+  const headings: HeadingInfo[] = []
+  for (const line of contentMd.split('\n')) {
+    const m = /^(#{1,6})\s+(.+)$/.exec(line)
+    if (m) {
+      headings.push({ level: m[1].length, text: m[2].trim() })
+    }
+  }
+  return headings
+}
 
 /**
- * 三级课程目录树（§3.2.1；2026-10-15 改）：Course → Lesson → Page。
- * - 树按同步目标过滤：只显示当前目标对应的本地课程；未同步显示空态提示
- * - 隐藏原生展开箭头（display:none 不占位，课程名顶左），点击课程行展开/收起
- *   （行尾 chevron 作提示）；图标在行内自绘，避免与标题换行错位
- * - 切换目标后自动恢复该课程上次编辑的页面（§3.2.2）
- * - Page 节点点击选中 → 右侧编辑器加载
- * - keyword 按页面标题过滤树节点
- * - 节点悬停菜单：新建章节/页面、删除、上传文档建页（§3.2.3 两步弹窗）
+ * 课程目录树（§3.2.1；2026-10-16 扁平化 + TOC）：Course → Page → Heading(H1-H6，2026-10-19 扩展)。
+ * - 树按同步目标过滤
+ * - 隐藏原生展开箭头，点击行展开/收起，行尾 chevron 提示
+ * - Page 节点点击选中→编辑器加载；chevron 展开其下 Heading 目录（TOC）
+ * - Heading 节点点击→编辑器滚动定位
+ * - Page 菜单：新建页面、上传文档建页、删除页面
  */
 export function CourseTree({ keyword }: { keyword: string }) {
   const { message, modal } = App.useApp()
@@ -30,28 +45,31 @@ export function CourseTree({ keyword }: { keyword: string }) {
   const selectedCourseId = useKnowledgeStore((s) => s.selectedCourseId)
   const selectedExternalId = useKnowledgeStore((s) => s.selectedExternalId)
   const externalCourses = useKnowledgeStore((s) => s.externalCourses)
-  const toggleExpand = useKnowledgeStore((s) => s.toggleExpand)
   const selectPage = useKnowledgeStore((s) => s.selectPage)
-  const createLesson = useKnowledgeStore((s) => s.createLesson)
   const createPage = useKnowledgeStore((s) => s.createPage)
   const deleteCourse = useKnowledgeStore((s) => s.deleteCourse)
-  const deleteLesson = useKnowledgeStore((s) => s.deleteLesson)
   const deletePage = useKnowledgeStore((s) => s.deletePage)
+  const reorderPages = useKnowledgeStore((s) => s.reorderPages)
+  const scrollToHeading = useKnowledgeStore((s) => s.scrollToHeading)
 
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([])
   const [inputState, setInputState] = useState<{
-    kind: 'lesson' | 'page'
+    kind: 'page'
     courseId: string
-    lessonId?: string
   } | null>(null)
   const [inputValue, setInputValue] = useState('')
   const [uploadTarget, setUploadTarget] = useState<{
     courseId: string
-    lessonId: string
-    lessonTitle: string
+    courseTitle: string
   } | null>(null)
 
-  /** 当前同步目标对应的本地课程（§3.2.1 树过滤依据） */
+  /** 拖拽排序状态（§3.2.1，2026-10-19）：正在拖拽的 Page id + 当前落点指示 */
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [dropTarget, setDropTarget] = useState<{
+    pageId: string
+    pos: 'before' | 'after'
+  } | null>(null)
+
   const visibleCourseId = useMemo(() => {
     if (!selectedExternalId) return null
     return (
@@ -60,7 +78,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
     )
   }, [externalCourses, selectedExternalId])
 
-  // 目标课程变化：自动展开 + 加载详情 + 恢复上次编辑页（§3.2.2）
+  // 目标课程变化：自动展开 + 加载详情 + 恢复上次编辑页
   useEffect(() => {
     if (!visibleCourseId) {
       setExpandedKeys([])
@@ -74,8 +92,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
       }
       const last = st.lastPageIdByCourse[visibleCourseId]
       const detail = useKnowledgeStore.getState().details[visibleCourseId]
-      const exists = detail?.lessons
-        .some((l) => l.pages.some((p) => p.id === last))
+      const exists = detail?.pages.some((p) => p.id === last)
       if (last && exists && st.selectedPageId !== last) {
         await st.selectPage(visibleCourseId, last)
       }
@@ -84,38 +101,56 @@ export function CourseTree({ keyword }: { keyword: string }) {
 
   const kw = keyword.trim().toLowerCase()
 
+  /** 拖拽排序启用条件：无搜索过滤（过滤后可见顺序不完整，不能据此排序）*/
+  const dragEnabled = !kw
+  /** 当前课程全部 Page 顺序（不受搜索过滤影响，用于计算拖拽后的新顺序） */
+  const pageOrder = useMemo(
+    () =>
+      visibleCourseId
+        ? (details[visibleCourseId]?.pages ?? []).map((p) => p.id)
+        : [],
+    [details, visibleCourseId],
+  )
+
   const treeData = useMemo<TreeDataNode[]>(() => {
     return courses
       .filter((course) => course.id === visibleCourseId)
       .map((course) => {
         const detail = details[course.id]
-        const lessons = (detail?.lessons ?? [])
-          .map((lesson) => {
-            const pages = lesson.pages
-              .filter((p) => !kw || p.title.toLowerCase().includes(kw))
-              .map((p) => ({
-                key: `page:${course.id}:${p.id}`,
-                title: p.title,
-                isLeaf: true,
-                _stale: p.syncState === 'STALE',
-                _ops: { courseId: course.id, pageId: p.id } as const,
-              }))
-            if (kw && pages.length === 0) return null
-            return {
-              key: `lesson:${course.id}:${lesson.id}`,
-              title: lesson.title,
-              children: pages,
-              _stale: lesson.syncState === 'STALE',
-              _ops: { courseId: course.id, lessonId: lesson.id } as const,
-            }
-          })
-          .filter(Boolean) as TreeDataNode[]
-        if (kw && lessons.length === 0) return null
+        const pages = (detail?.pages ?? []).flatMap((p) => {
+          const titleMatch = p.title.toLowerCase().includes(kw)
+          const headings = parseHeadings(p.contentMd)
+          // 搜索口径（§3.2.1，2026-10-19）：匹配 Page 标题 + 全部 Heading（不含正文）。
+          // 标题命中→显示该页全部 Heading；仅 Heading 命中→只显示匹配的 Heading；无关键字→全部。
+          const visibleHeadings = !kw
+            ? headings
+            : titleMatch
+              ? headings
+              : headings.filter((h) => h.text.toLowerCase().includes(kw))
+          if (kw && !titleMatch && visibleHeadings.length === 0) return []
+          const headingNodes = visibleHeadings.map((h) => ({
+            key: `heading:${course.id}:${p.id}:${h.level}:${h.text}`,
+            title: h.text,
+            isLeaf: true,
+            _level: h.level,
+            _ops: { courseId: course.id, pageId: p.id, heading: h.text } as const,
+          }))
+          return [
+            {
+              key: `page:${course.id}:${p.id}`,
+              title: p.title,
+              children: headingNodes,
+              _stale: p.syncState === 'STALE',
+              _ops: { courseId: course.id, pageId: p.id } as const,
+            },
+          ]
+        })
+        if (kw && pages.length === 0) return null
         return {
           key: `course:${course.id}`,
           title: course.title,
           selectable: false,
-          children: lessons,
+          children: pages,
           _ops: { courseId: course.id } as const,
         }
       })
@@ -128,8 +163,8 @@ export function CourseTree({ keyword }: { keyword: string }) {
     const keys: React.Key[] = []
     for (const node of treeData) {
       keys.push(node.key)
-      for (const lesson of node.children ?? []) {
-        keys.push(lesson.key)
+      for (const page of node.children ?? []) {
+        keys.push(page.key)
       }
     }
     setExpandedKeys(keys)
@@ -137,47 +172,87 @@ export function CourseTree({ keyword }: { keyword: string }) {
 
   const handleSelect = (keys: React.Key[]) => {
     const key = keys[0]
-    if (typeof key !== 'string' || !key.startsWith('page:')) return
-    const [, courseId, pageId] = key.split(':')
-    void selectPage(courseId, pageId)
+    if (typeof key !== 'string') return
+    if (key.startsWith('page:')) {
+      const [, courseId, pageId] = key.split(':')
+      void selectPage(courseId, pageId)
+    } else if (key.startsWith('heading:')) {
+      // heading:courseId:pageId:level:text
+      const parts = key.split(':')
+      const courseId = parts[1]
+      const pageId = parts[2]
+      const heading = parts.slice(4).join(':')
+      // 跨文件：先切换到目标页面，再滚动到 heading
+      if (pageId !== selectedPageId) {
+        void (async () => {
+          await selectPage(courseId, pageId)
+          // 等待编辑器加载完成后再滚动（PageEditor 的 effect 会监听 tocScrollTarget）
+          scrollToHeading(heading)
+        })()
+      } else {
+        scrollToHeading(heading)
+      }
+    }
   }
 
-  /** 点击课程/章节行：展开/收起（原生箭头已隐藏，§3.2.1）；courseId 传入时触发懒加载 */
-  const toggleRow = (key: string, courseId?: string) => {
+  const toggleRow = (key: string) => {
+    // course 节点始终展开，不允许折叠
+    if (key.startsWith('course:')) return
     setExpandedKeys((prev) => {
       if (prev.map(String).includes(key)) {
         return prev.filter((k) => String(k) !== key)
       }
-      if (courseId) void toggleExpand(courseId)
       return [...prev, key]
     })
   }
 
   const handleExpand = (keys: React.Key[]) => {
-    const prev = new Set(expandedKeys.map(String))
-    for (const k of keys) {
-      const s = String(k)
-      if (s.startsWith('course:') && !prev.has(s)) {
-        void toggleExpand(s.slice(7))
-      }
-    }
-    setExpandedKeys(keys)
+    // course 节点始终保持展开
+    const courseKey = `course:${visibleCourseId}`
+    const filtered = keys.filter((k) => String(k) !== courseKey)
+    setExpandedKeys([courseKey, ...filtered])
   }
 
-  const openCreate = (kind: 'lesson' | 'page', courseId: string, lessonId?: string) => {
-    setInputState({ kind, courseId, lessonId })
+  /** 拖拽落点判定：指针位于行的上半→插到目标之前，下半→之后 */
+  const resolveDropPos = (e: React.DragEvent): 'before' | 'after' => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    return e.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
+  }
+
+  /** 拖拽结束：把 fromId 移动到 targetId 的前/后，调用批量排序接口持久化 */
+  const performReorder = async (
+    fromId: string,
+    targetId: string,
+    pos: 'before' | 'after',
+  ) => {
+    if (!visibleCourseId || fromId === targetId) return
+    const next = [...pageOrder]
+    const fromIdx = next.indexOf(fromId)
+    if (fromIdx < 0) return
+    next.splice(fromIdx, 1)
+    let toIdx = next.indexOf(targetId)
+    if (toIdx < 0) return
+    if (pos === 'after') toIdx += 1
+    next.splice(toIdx, 0, fromId)
+    // 顺序无变化则不发请求
+    if (next.every((id, i) => id === pageOrder[i])) return
+    try {
+      await reorderPages(visibleCourseId, next)
+    } catch (e) {
+      message.error((e as Error).message || '排序保存失败')
+    }
+  }
+
+  const openCreate = (courseId: string) => {
+    setInputState({ kind: 'page', courseId })
     setInputValue('')
   }
 
   const submitCreate = async () => {
     if (!inputState || !inputValue.trim()) return
-    const { kind, courseId, lessonId } = inputState
+    const { courseId } = inputState
     try {
-      if (kind === 'lesson') {
-        await createLesson(courseId, inputValue.trim())
-      } else if (lessonId) {
-        await createPage(courseId, lessonId, inputValue.trim())
-      }
+      await createPage(courseId, inputValue.trim())
       setInputState(null)
     } catch (e) {
       message.error((e as Error).message)
@@ -202,22 +277,18 @@ export function CourseTree({ keyword }: { keyword: string }) {
     })
   }
 
-  /** 上传文档建页（§3.2.3）：打开两步弹窗 */
-  const openUpload = (
-    courseId: string,
-    lessonId: string,
-    lessonTitle: string,
-  ) => {
-    setUploadTarget({ courseId, lessonId, lessonTitle })
+  const openUpload = (courseId: string, courseTitle: string) => {
+    setUploadTarget({ courseId, courseTitle })
   }
 
   const menuFor = (node: TreeDataNode) => {
     const ops = (
       node as unknown as {
-        _ops?: { courseId: string; lessonId?: string; pageId?: string }
+        _ops?: { courseId: string; pageId?: string; heading?: string }
       }
     )._ops
     if (!ops) return null
+    if (ops.heading) return null // heading 节点无菜单
     if (ops.pageId) {
       return {
         items: [{ key: 'del-page', label: '删除页面', danger: true }],
@@ -227,31 +298,15 @@ export function CourseTree({ keyword }: { keyword: string }) {
         },
       }
     }
-    if (ops.lessonId) {
-      return {
-        items: [
-          { key: 'new-page', label: '新建页面' },
-          { key: 'upload', label: '上传文档建页' },
-          { key: 'del-lesson', label: '删除章节', danger: true },
-        ],
-        onClick: ({ key }: { key: string }) => {
-          if (key === 'new-page') openCreate('page', ops.courseId, ops.lessonId)
-          if (key === 'upload')
-            openUpload(ops.courseId, ops.lessonId!, node.title as string)
-          if (key === 'del-lesson')
-            confirmDelete('章节（含其下所有页面）', () =>
-              deleteLesson(ops.courseId, ops.lessonId!),
-            )
-        },
-      }
-    }
     return {
       items: [
-        { key: 'new-lesson', label: '新建章节' },
+        { key: 'new-page', label: '新建页面' },
+        { key: 'upload', label: '上传文档建页' },
         { key: 'del-course', label: '删除课程', danger: true },
       ],
       onClick: ({ key }: { key: string }) => {
-        if (key === 'new-lesson') openCreate('lesson', ops.courseId)
+        if (key === 'new-page') openCreate(ops.courseId)
+        if (key === 'upload') openUpload(ops.courseId, node.title as string)
         if (key === 'del-course')
           confirmDelete('课程', () => deleteCourse(ops.courseId))
       },
@@ -281,36 +336,107 @@ export function CourseTree({ keyword }: { keyword: string }) {
   return (
     <>
       <div className="course-tree-no-switcher">
-        <Tree
-          blockNode
-          treeData={treeData}
-          expandedKeys={expandedKeys}
-          selectedKeys={
-            selectedCourseId && selectedPageId
-              ? [`page:${selectedCourseId}:${selectedPageId}`]
-              : []
-          }
-          onExpand={handleExpand}
-          onSelect={handleSelect}
-          titleRender={(node) => {
+        {kw && treeData.length === 0 ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={
+              <span style={{ fontSize: tokens.fontSize.md }}>无匹配结果</span>
+            }
+          />
+        ) : (
+          <Tree
+            blockNode
+            treeData={treeData}
+            expandedKeys={expandedKeys}
+            selectedKeys={
+              selectedCourseId && selectedPageId
+                ? [`page:${selectedCourseId}:${selectedPageId}`]
+                : []
+            }
+            onExpand={handleExpand}
+            onSelect={handleSelect}
+            titleRender={(node) => {
             const stale = (node as unknown as { _stale?: boolean })._stale
+            const level = (node as unknown as { _level?: number })._level
             const key = String(node.key)
             const isCourse = key.startsWith('course:')
-            const isLesson = key.startsWith('lesson:')
+            const isPage = key.startsWith('page:')
+            const isHeading = key.startsWith('heading:')
             const expanded = expandedKeys.map(String).includes(key)
-            const onRowClick = isCourse
-              ? () => toggleRow(key, key.slice(7))
-              : isLesson
-                ? () => toggleRow(key)
-                : undefined
+            // Page 点击行为：
+            // - 点击当前选中的 page → 切换展开/折叠其 Heading 目录
+            // - 点击其他 page → 只切换文件（由 onSelect 处理），不展开/折叠
+            // - course 始终展开，不可折叠
+            const pageId = isPage ? key.split(':')[2] : null
+            const pid = pageId ?? ''
+            const isCurrentPage = pageId === selectedPageId
+            const onRowClick =
+              isPage && isCurrentPage ? () => toggleRow(key) : undefined
+            // 拖拽排序（§3.2.1，2026-10-19）：仅 Page 行可作为落点，搜索过滤时禁用
+            const isDropTarget = isPage && dropTarget?.pageId === pid
+            const canDropHere =
+              isPage && dragEnabled && !!draggingId && draggingId !== pid
+            const isDragging = isPage && draggingId === pid
+            // heading 字体大小按层级递减
+            const headingFontSize =
+              level === 1 ? tokens.fontSize.md : level === 2 ? tokens.fontSize.sm : tokens.fontSize.xs
             return (
               <div
                 style={{
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
+                  opacity: isDragging ? 0.4 : 1,
+                  boxShadow: isDropTarget
+                    ? dropTarget!.pos === 'before'
+                      ? `inset 0 2px 0 ${tokens.color.primary}`
+                      : `inset 0 -2px 0 ${tokens.color.primary}`
+                    : undefined,
                 }}
                 onClick={onRowClick}
+                onDragOver={
+                  canDropHere
+                    ? (e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        e.dataTransfer.dropEffect = 'move'
+                        const pos = resolveDropPos(e)
+                        setDropTarget((prev) =>
+                          prev?.pageId === pid && prev.pos === pos
+                            ? prev
+                            : { pageId: pid, pos },
+                        )
+                      }
+                    : undefined
+                }
+                onDragLeave={
+                  canDropHere
+                    ? (e) => {
+                        // 指针移入子元素不算离开本行
+                        if (
+                          (e.currentTarget as HTMLElement).contains(
+                            e.relatedTarget as Node,
+                          )
+                        )
+                          return
+                        setDropTarget((prev) =>
+                          prev?.pageId === pid ? null : prev,
+                        )
+                      }
+                    : undefined
+                }
+                onDrop={
+                  canDropHere
+                    ? (e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        const pos = resolveDropPos(e)
+                        void performReorder(draggingId!, pid, pos)
+                        setDraggingId(null)
+                        setDropTarget(null)
+                      }
+                    : undefined
+                }
               >
                 <span
                   style={{
@@ -318,17 +444,63 @@ export function CourseTree({ keyword }: { keyword: string }) {
                     alignItems: 'center',
                     gap: tokens.spacing.xs + 2,
                     minWidth: 0,
+                    fontSize: isHeading
+                      ? headingFontSize
+                      : isCourse
+                        ? tokens.fontSize.xl
+                        : tokens.fontSize.md,
+                    fontWeight: isHeading
+                      ? undefined
+                      : isCourse
+                        ? tokens.fontWeight.semibold
+                        : tokens.fontWeight.medium,
+                    color: isHeading
+                      ? undefined
+                      : isCourse
+                        ? tokens.color.primary
+                        : tokens.color.text.primary,
                   }}
                 >
-                  {isCourse ? (
-                    <BookOutlined style={{ color: tokens.color.primary }} />
-                  ) : isLesson ? (
-                    <FolderOutlined style={{ color: tokens.color.warning }} />
-                  ) : (
-                    <FileTextOutlined style={{ color: tokens.color.text.secondary }} />
+                  {isPage && dragEnabled && (
+                    <span
+                      className="page-drag-handle"
+                      draggable
+                      title="拖拽调整顺序"
+                      onClick={(e) => e.stopPropagation()}
+                      onDragStart={(e) => {
+                        e.stopPropagation()
+                        e.dataTransfer.effectAllowed = 'move'
+                        // 部分浏览器必须 setData 才会触发后续拖拽事件
+                        e.dataTransfer.setData('text/plain', pid)
+                        setDraggingId(pid)
+                      }}
+                      onDragEnd={() => {
+                        setDraggingId(null)
+                        setDropTarget(null)
+                      }}
+                    >
+                      <HolderOutlined />
+                    </span>
                   )}
+                  {isPage ? (
+                    <PageFileIcon
+                      size={16}
+                      color={tokens.color.text.secondary}
+                    />
+                  ) : isHeading ? (
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        width: 4,
+                        height: 4,
+                        borderRadius: '50%',
+                        background: tokens.color.text.tertiary,
+                        marginLeft: tokens.spacing.sm,
+                      }}
+                    />
+                  ) : null}
                   {stale ? (
-                    <Tooltip title="该节点与外部源不同步，不会作为 AI Tutor 知识库使用；内容已失效，可自行复制所需内容后删除">
+                    <Tooltip title="该节点与外部源不同步，不会作为 AI Tutor 知识库使用">
                       <span
                         style={{
                           color: tokens.color.text.disabled,
@@ -351,7 +523,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
                   )}
                 </span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: tokens.spacing.xs }}>
-                  {(isCourse || isLesson) && (
+                  {isPage && (
                     <RightOutlined
                       style={{
                         fontSize: tokens.fontSize.xs,
@@ -374,6 +546,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
             )
           }}
         />
+        )}
       </div>
       <UploadDocumentModal
         target={uploadTarget}
@@ -381,7 +554,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
       />
       <Modal
         open={!!inputState}
-        title={inputState?.kind === 'lesson' ? '新建章节' : '新建页面'}
+        title="新建页面"
         okText="创建"
         cancelText="取消"
         onOk={submitCreate}
@@ -390,7 +563,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
       >
         <Input
           autoFocus
-          placeholder="名称"
+          placeholder="页面名称"
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onPressEnter={submitCreate}

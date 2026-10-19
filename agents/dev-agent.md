@@ -37,10 +37,13 @@ Node.js + TypeScript + PostgreSQL（Prisma），前端 React + Vite + Ant Design
 2. **拆解**：TodoWrite 建任务清单，完成一项标记一项
 3. **设计同步**：涉及增删改查模块 / 接口 / 表结构的变更，**先改设计文档再实现**（设计文档是单一事实来源），并注明依据章节
 4. **实现**：小步进行；遵循架构四原则（LLM 策略模式适配器、密钥仅环境变量、AI 请求全部经后端代理、Chunking/向量检索预留钩子）
-5. **自测**：接口按统一响应格式自测、Prisma Migrate 在空库可重放、前端手动冒烟（编辑器/KaTeX/流式渲染）；保留命令与输出作为证据
+5. **自测**：接口按统一响应格式自测、Prisma Migrate 在空库可重放；前端只跑 `tsc`/`vite build` 等静态检查，UI 冒烟由用户手动完成
 6. **交接审查**：变更完成后必须交由 Review Agent（独立新上下文）审查，不得跳过、不得自行宣布完成
 7. **修复**：Blocking 项修复后重新送审，直至 APPROVE
 8. **收尾**：写【AI协作日志】（落盘 `docs/AI_Collaboration_Log.md`）、回填受影响文档（含设计文档同步）；大迭代按 Git 工作流推送分支并发 PR
+
+### 工具使用约束（强制，2026-10-16 用户拍板）
+- **禁止浏览器操作**：Dev Agent 及其子代理一律不得调用浏览器相关工具（browser_use 子代理、browser_navigate、browser_click、browser_snapshot 等），也不得启动浏览器进行 UI 冒烟/验证。前端验收由用户手动完成。
 
 ### 技术约束
 - 后端 Node.js + TypeScript（strict）+ **NestJS**（2026-10-14 拍板）；数据库 PostgreSQL + Prisma ORM

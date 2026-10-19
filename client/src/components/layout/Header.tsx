@@ -1,12 +1,13 @@
 import { Avatar, Layout, Typography } from '../ui'
-import { BellOutlined, BookOutlined } from '@ant-design/icons'
 import { tokens } from '../../theme/tokens'
+import { LogoIcon, BellIcon } from '../icons'
 
 const { Header } = Layout
 
 /**
- * 顶部导航（§3.1 排版对齐设计稿 2026-10-14）：
- * 白底；左侧 logo + 产品名；右侧通知铃铛 + 当前用户（演示身份，静态占位）。
+ * 顶部导航（对齐 Figma 设计库 2026-10-19）：
+ * 白底；左侧 logo（蓝色圆角底 + 白色学士帽）+ 产品名；右侧通知铃铛 + 当前用户。
+ * 高度 68px，边框 #E8EDF5，主色 #1D6BFF。
  */
 export function AppHeader() {
   return (
@@ -18,41 +19,37 @@ export function AppHeader() {
         background: tokens.color.bg.container,
         borderBottom: `1px solid ${tokens.color.border}`,
         padding: `0 ${tokens.spacing.xl}px`,
-        height: 56,
-        lineHeight: '56px',
+        height: 68,
+        lineHeight: '68px',
       }}
     >
-      <div
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: tokens.radius.md,
-          background: tokens.color.primary,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-        }}
+      <LogoIcon size={36} />
+      <Typography.Text
+        strong
+        style={{ fontSize: tokens.fontSize['3xl'], color: tokens.color.text.primary }}
       >
-        <BookOutlined style={{ color: tokens.color.bg.container, fontSize: tokens.fontSize['2xl'] }} />
-      </div>
-      <Typography.Text strong style={{ fontSize: tokens.fontSize['2xl'] }}>
         Learning Guide BackOffice
       </Typography.Text>
       <div style={{ flex: 1 }} />
-      <BellOutlined style={{ fontSize: tokens.fontSize['2xl'], color: tokens.color.text.icon }} />
+      <BellIcon size={18} color={tokens.color.text.icon} />
       <Avatar
-        size={30}
+        size={32}
         style={{
           background: tokens.color.primary,
-          fontSize: tokens.fontSize.lg,
+          fontSize: tokens.fontSize.xl,
           marginLeft: tokens.spacing.md,
         }}
       >
         J
       </Avatar>
-      <div style={{ lineHeight: 1.2 }}>
-        <div style={{ fontSize: tokens.fontSize.lg, fontWeight: tokens.fontWeight.semibold }}>
+      <div style={{ lineHeight: 1.3 }}>
+        <div
+          style={{
+            fontSize: tokens.fontSize.xl,
+            fontWeight: tokens.fontWeight.semibold,
+            color: tokens.color.text.primary,
+          }}
+        >
           Jack
         </div>
         <div style={{ fontSize: tokens.fontSize.md, color: tokens.color.text.tertiary }}>

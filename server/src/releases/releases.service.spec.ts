@@ -3,15 +3,14 @@ import { ReleasesService } from './releases.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
- * ReleasesService 单元测试：快照结构、versionTag 格式、发布即激活、
- * 切换激活版本（重建草稿树）与 isActive 标注（§5.1.4、§3.4.2/§3.4.3）。
+ * ReleasesService 单元测试（2026-10-16 扁平化：lessons → pages）。
+ * 快照结构、versionTag 格式、发布即激活、切换激活版本（重建 Page 草稿）与 isActive 标注。
  */
 describe('ReleasesService', () => {
   const mockTx = {
     course: { findUnique: jest.fn(), update: jest.fn() },
     release: { create: jest.fn() },
-    lesson: { deleteMany: jest.fn(), create: jest.fn() },
-    page: { create: jest.fn() },
+    page: { deleteMany: jest.fn(), create: jest.fn() },
   };
   const mockPrisma = {
     course: { findUnique: jest.fn() },
@@ -28,18 +27,12 @@ describe('ReleasesService', () => {
     service = new ReleasesService(mockPrisma as unknown as PrismaService);
   });
 
-  it('publish：快照应含 lessons/pages 内容，versionTag 匹配 CourseName_YYYYMMDDHHmm，且发布即激活（更新 currentReleaseId）；读取与写入同事务（§3.4.3）', async () => {
+  it('publish：快照应含 pages 内容，versionTag 匹配 CourseName_YYYYMMDDHHmm，且发布即激活（§3.4.3）', async () => {
     mockTx.course.findUnique.mockResolvedValue({
       id: 'c1',
       title: '数学基础',
-      lessons: [
-        {
-          id: 'l1',
-          title: '第一章',
-          pages: [
-            { id: 'p1', title: '1.1', contentMd: '# hi', tags: ['Core'] },
-          ],
-        },
+      pages: [
+        { id: 'p1', title: '第一章', contentMd: '# hi', sectionTags: null },
       ],
     });
     mockTx.release.create.mockImplementation(({ data }: { data: unknown }) =>
@@ -52,21 +45,16 @@ describe('ReleasesService', () => {
 
     expect(result.versionTag).toMatch(/^数学基础_\d{12}$/);
     expect(result.snapshotData).toEqual({
-      lessons: [
-        {
-          id: 'l1',
-          title: '第一章',
-          pages: [{ id: 'p1', title: '1.1', contentMd: '# hi', tags: ['Core'] }],
-        },
+      pages: [
+        { id: 'p1', title: '第一章', contentMd: '# hi', sectionTags: null },
       ],
     });
     expect(result.revisionNotes).toBe('首发');
-    // 发布即激活（§3.4.3）
     expect(mockTx.course.update).toHaveBeenCalledWith({
       where: { id: 'c1' },
       data: { currentReleaseId: 'r1' },
     });
-    // 快照仅收录 SYNCED 节点（§3.2.2/§3.4.3）：事务内查询条件应带 syncState 过滤
+    // 快照仅收录 SYNCED 节点：事务内查询条件应带 syncState 过滤
     const courseQuery = mockTx.course.findUnique.mock
       .calls[0][0] as Record<string, never>;
     expect(JSON.stringify(courseQuery)).toContain('SYNCED');
@@ -96,25 +84,16 @@ describe('ReleasesService', () => {
     expect(select.select.snapshotData).toBeUndefined();
   });
 
-  it('activate：事务内重建草稿树并更新 currentReleaseId', async () => {
+  it('activate：事务内重建 Page 草稿并更新 currentReleaseId', async () => {
     mockPrisma.course.findUnique.mockResolvedValue({ id: 'c1' });
-    mockTx.lesson.create.mockImplementation(({ data }: { data: { title: string } }) =>
-      Promise.resolve({ id: `new-${data.title}` }),
-    );
     mockPrisma.release.findUnique.mockResolvedValue({
       id: 'r2',
       courseId: 'c1',
       versionTag: '数学基础_202610150000',
       snapshotData: {
-        lessons: [
-          {
-            id: 'l1',
-            title: '第一章',
-            pages: [
-              { id: 'p1', title: '1.1', contentMd: '# old', tags: null },
-              { id: 'p2', title: '1.2', contentMd: '# keep', tags: ['Core'] },
-            ],
-          },
+        pages: [
+          { id: 'p1', title: '第一章', contentMd: '# old', sectionTags: null },
+          { id: 'p2', title: '第二章', contentMd: '# keep', sectionTags: { 'h1-sec': ['tag'] } },
         ],
       },
     });
@@ -125,19 +104,17 @@ describe('ReleasesService', () => {
       id: 'r2',
       versionTag: '数学基础_202610150000',
     });
-    // 旧树整棵删除（Page 级联）
-    expect(mockTx.lesson.deleteMany).toHaveBeenCalledWith({
+    // 删除当前所有 Page
+    expect(mockTx.page.deleteMany).toHaveBeenCalledWith({
       where: { courseId: 'c1' },
     });
-    // 快照节点重建：1 lesson + 2 pages，sortOrder 按快照顺序
-    expect(mockTx.lesson.create).toHaveBeenCalledTimes(1);
+    // 快照节点重建：2 pages，sortOrder 按快照顺序
     expect(mockTx.page.create).toHaveBeenCalledTimes(2);
     expect(mockTx.page.create.mock.calls[1][0].data).toMatchObject({
-      title: '1.2',
+      title: '第二章',
       contentMd: '# keep',
       sortOrder: 1,
     });
-    // 激活指针更新
     expect(mockTx.course.update).toHaveBeenCalledWith({
       where: { id: 'c1' },
       data: { currentReleaseId: 'r2' },

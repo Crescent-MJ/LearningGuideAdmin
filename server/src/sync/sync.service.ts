@@ -1,10 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { SyncState } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   ExtCourse,
   ExtLesson,
-  ExtPage,
   getExternalCourse,
   listExternalCourses,
 } from './demo-fixtures';
@@ -26,25 +25,71 @@ export interface ExternalCourseStatus {
   status: 'not_synced' | 'synced' | 'has_updates';
 }
 
-/** 本地树节点（从 Prisma 载入的精简形状） */
+/** 本地 Page（从 Prisma 载入的精简形状） */
 interface LocalPage {
   id: string;
   title: string;
   contentMd: string;
-  tags: string[];
+  sectionTags: Record<string, string[]> | null;
   syncState: SyncState;
-}
-interface LocalLesson {
-  id: string;
-  title: string;
-  syncState: SyncState;
-  pages: LocalPage[];
 }
 
 /**
- * 外部源同步（§3.2.2 外部源接管模型）。
+ * 将外部一个 Lesson 的多个 Page 合并为本地一个 Page 的 contentMd：
+ * Lesson.title 仅作为本地 Page 的标题（文件名），不写入内容；
+ * 各外部 Page 以 `# {Page.title}` 为 H1 section 拼接。
+ * 2026-10-16 修正：去掉开头 `# {Lesson.title}`，避免重复 H1 且 Lesson 名与内容 H1 混淆。
+ */
+function mergeLessonContent(lesson: ExtLesson): string {
+  const parts: string[] = [];
+  for (const p of lesson.pages) {
+    parts.push(`# ${p.title}`, '', p.contentMd, '');
+  }
+  return parts.join('\n').trimEnd() + '\n';
+}
+
+/**
+ * structure 模式（仅同步框架）：
+ * Lesson.title 作为 Page 标题，内容仅列出各外部 Page.title 作为 H1（正文留空）。
+ * 2026-10-16 修正：与 all 模式一致，Lesson.title 不入内容，Page.title 为 H1。
+ */
+function mergeLessonOutline(lesson: ExtLesson): string {
+  const parts = lesson.pages.map((p) => `# ${p.title}`);
+  return parts.length ? parts.join('\n\n') + '\n' : '';
+}
+
+/** heading 文本转 slug：小写、空格转 -、去特殊字符（用于 sectionTags 映射 key） */
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    // 保留 Unicode 字母/数字（含中文），仅去掉标点符号等特殊字符；
+    // 之前用 \w 会把中文全部清空，导致多个中文 heading 生成相同 key（h2-）而碰撞。
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
+}
+
+/** 生成带层级前缀的 heading key：`h{n}-{slug}`（2026-10-16：避免 H1-H6 同名冲突） */
+function headingKey(level: number, text: string): string {
+  return `h${level}-${slugify(text)}`;
+}
+
+/** 提取 markdown 中所有 H1-H6 的 headingKey 集合（用于 sectionTags 迁移时过滤，2026-10-19 由 #{1,3} 放宽为 #{1,6}） */
+function extractHeadingKeys(contentMd: string): Set<string> {
+  const keys = new Set<string>();
+  for (const line of contentMd.split('\n')) {
+    const m = /^(#{1,6})\s+(.+)$/.exec(line);
+    if (m) keys.add(headingKey(m[1].length, m[2].trim()));
+  }
+  return keys;
+}
+
+/**
+ * 外部源同步（§3.2.2 外部源接管模型，2026-10-16 扁平化）。
+ * 外部源 Course→Lesson→Page，本地 Course→Page（一个 Lesson 合并为一个 Page）。
  * 非破坏性：绝不覆盖本地正文，过期内容标 STALE 交用户处置。
- * 外部源数据来自 demo-fixtures（Mock），真实 API 接入后仅替换数据源。
+ * 方案 C：同步新建 Page 时按 heading slug 迁移旧 Page 的 sectionTags。
  */
 @Injectable()
 export class SyncService {
@@ -60,8 +105,8 @@ export class SyncService {
       });
       let status: ExternalCourseStatus['status'] = 'not_synced';
       if (local) {
-        const tree = await this.loadLocalTree(local.id);
-        const diff = this.countDiff(tree, ext);
+        const pages = await this.loadLocalPages(local.id);
+        const diff = this.countDiff(pages, ext);
         status = diff === 0 ? 'synced' : 'has_updates';
       }
       result.push({
@@ -85,7 +130,6 @@ export class SyncService {
       where: { externalId },
       select: { id: true },
     });
-    // 导入：本地无对应课程则新建（标题/描述/externalId 取自外部源）
     if (!local) {
       const created = await this.prisma.course.create({
         data: { title: ext.title, description: ext.description, externalId },
@@ -94,79 +138,54 @@ export class SyncService {
       local = created;
     }
 
-    const tree = await this.loadLocalTree(local.id);
-    return this.apply(ext, tree, mode, local.id);
+    const pages = await this.loadLocalPages(local.id);
+    return this.apply(ext, pages, mode, local.id);
   }
 
   // ---------- 内部实现 ----------
 
-  private async loadLocalTree(courseId: string): Promise<LocalLesson[]> {
-    const lessons = await this.prisma.lesson.findMany({
+  private async loadLocalPages(courseId: string): Promise<LocalPage[]> {
+    const pages = await this.prisma.page.findMany({
       where: { courseId },
       orderBy: { sortOrder: 'asc' },
-      include: { pages: { orderBy: { sortOrder: 'asc' } } },
     });
-    return lessons.map((l) => ({
-      id: l.id,
-      title: l.title,
-      syncState: l.syncState,
-      pages: l.pages.map((p) => ({
-        id: p.id,
-        title: p.title,
-        contentMd: p.contentMd,
-        tags: (p.tags as string[] | null) ?? [],
-        syncState: p.syncState,
-      })),
+    return pages.map((p) => ({
+      id: p.id,
+      title: p.title,
+      contentMd: p.contentMd,
+      sectionTags: p.sectionTags as Record<string, string[]> | null,
+      syncState: p.syncState,
     }));
   }
 
-  /** 计算「若执行 all 同步会产生多少处变更」，用于状态展示（与 apply 判定口径一致） */
-  private countDiff(tree: LocalLesson[], ext: ExtCourse): number {
+  /** 计算「若执行 all 同步会产生多少处变更」，用于状态展示 */
+  private countDiff(pages: LocalPage[], ext: ExtCourse): number {
     let n = 0;
-    const matchedLessonIds = new Set<string>();
-    const extLessonTitles = new Set(ext.lessons.map((l) => l.title));
+    const matchedIds = new Set<string>();
+    const extTitles = new Set(ext.lessons.map((l) => l.title));
 
     for (const el of ext.lessons) {
-      const ll = this.matchLesson(tree, el.title);
-      if (!ll) {
-        n += 1 + el.pages.length; // 新增章 + 其页
+      const lp = this.matchPage(pages, el.title);
+      if (!lp) {
+        n += 1; // 新增合并 Page
         continue;
       }
-      matchedLessonIds.add(ll.id);
-      const extPageTitles = new Set(el.pages.map((p) => p.title));
-      for (const ep of el.pages) {
-        const lp = this.matchPage(ll.pages, ep.title);
-        if (!lp) {
-          n += 1; // 新增页
-          continue;
-        }
-        if (lp.contentMd !== ep.contentMd) n += 2; // 本地 STALE + 新增新页
-      }
-      // 本地有、外部无的页 → STALE
-      for (const lp of ll.pages) {
-        if (lp.syncState === SyncState.SYNCED && !extPageTitles.has(lp.title)) n += 1;
-      }
+      matchedIds.add(lp.id);
+      const merged = mergeLessonContent(el);
+      if (lp.contentMd !== merged) n += 2; // 本地 STALE + 新增新页
     }
 
-    // 本地有、外部无的章 → STALE
-    for (const ll of tree) {
+    // 本地有、外部无 → STALE
+    for (const lp of pages) {
       if (
-        ll.syncState === SyncState.SYNCED &&
-        !extLessonTitles.has(ll.title) &&
-        !matchedLessonIds.has(ll.id)
+        lp.syncState === SyncState.SYNCED &&
+        !extTitles.has(lp.title) &&
+        !matchedIds.has(lp.id)
       ) {
         n += 1;
       }
     }
     return n;
-  }
-
-  private matchLesson(tree: LocalLesson[], title: string): LocalLesson | undefined {
-    // 优先匹配 SYNCED 同名章节；否则任意同名
-    return (
-      tree.find((l) => l.title === title && l.syncState === SyncState.SYNCED) ??
-      tree.find((l) => l.title === title)
-    );
   }
 
   private matchPage(pages: LocalPage[], title: string): LocalPage | undefined {
@@ -188,151 +207,114 @@ export class SyncService {
     return candidate;
   }
 
+  /**
+   * 方案 C：从旧 Page 的 sectionTags 中，仅保留新 contentMd 中存在的 headingKey 对应的 tags。
+   * （2026-10-16：headingKey 带层级前缀 h{n}-slug，覆盖 H1-H6；页面级 tags 已移除）
+   */
+  private migrateTags(
+    oldPage: LocalPage,
+    newContentMd: string,
+  ): { sectionTags: Record<string, string[]> | undefined } {
+    const validKeys = extractHeadingKeys(newContentMd);
+    const sectionTags: Record<string, string[]> = {};
+    if (oldPage.sectionTags) {
+      for (const [key, tags] of Object.entries(oldPage.sectionTags)) {
+        if (validKeys.has(key)) sectionTags[key] = tags;
+      }
+    }
+    return {
+      sectionTags: Object.keys(sectionTags).length > 0 ? sectionTags : undefined,
+    };
+  }
+
   private async apply(
     ext: ExtCourse,
-    tree: LocalLesson[],
+    pages: LocalPage[],
     mode: SyncMode,
     courseId: string,
   ): Promise<SyncSummary> {
     let created = 0;
     let staleMarked = 0;
 
-    const lessonTitles = new Set(tree.map((l) => l.title));
-    const matchedLessonIds = new Set<string>();
+    const pageTitles = new Set(pages.map((p) => p.title));
+    const matchedIds = new Set<string>();
 
     await this.prisma.$transaction(async (tx) => {
       for (const el of ext.lessons) {
-        const ll = this.matchLesson(tree, el.title);
+        const lp = this.matchPage(pages, el.title);
 
-        if (!ll) {
-          // 外部有、本地无 → 新增章（含页）
-          const resolvedLessonTitle = this.resolveTitle(el.title, lessonTitles);
-          lessonTitles.add(resolvedLessonTitle);
-          const pageTitles = new Set<string>();
-          const sortOrder = tree.length + created; // 追加排序（简化）
-          const lesson = await tx.lesson.create({
+        if (!lp) {
+          // 外部有、本地无 → 新增合并 Page
+          const resolvedTitle = this.resolveTitle(el.title, pageTitles);
+          pageTitles.add(resolvedTitle);
+          const sortOrder = pages.length + created;
+          await tx.page.create({
             data: {
               courseId,
-              title: resolvedLessonTitle,
+              title: resolvedTitle,
+              contentMd: mode === 'all' ? mergeLessonContent(el) : mergeLessonOutline(el),
               sortOrder,
               syncState: SyncState.SYNCED,
-              pages: {
-                create: el.pages.map((ep, pi) => {
-                  const t = this.resolveTitle(ep.title, pageTitles);
-                  pageTitles.add(t);
-                  return {
-                    title: t,
-                    contentMd: mode === 'all' ? ep.contentMd : '',
-                    tags: ep.tags,
-                    sortOrder: pi,
-                    syncState: SyncState.SYNCED,
-                  };
-                }),
-              },
             },
           });
-          created += 1 + el.pages.length;
-          tree.push({
-            id: lesson.id,
-            title: resolvedLessonTitle,
-            syncState: SyncState.SYNCED,
-            pages: [],
-          });
-          matchedLessonIds.add(lesson.id);
+          created += 1;
           continue;
         }
 
-        matchedLessonIds.add(ll.id);
-        const pageTitles = new Set(ll.pages.map((p) => p.title));
+        matchedIds.add(lp.id);
+        const merged = mergeLessonContent(el);
 
-        for (const ep of el.pages) {
-          const lp = this.matchPage(ll.pages, ep.title);
+        if (mode === 'all' && lp.contentMd !== merged) {
+          // 幂等保护：若已存在内容一致的 SYNCED 页，跳过
+          const alreadySynced = pages.some(
+            (p) => p.syncState === SyncState.SYNCED && p.contentMd === merged,
+          );
+          if (alreadySynced) continue;
 
-          if (!lp) {
-            // 外部有、本地无 → 新增页
-            const t = this.resolveTitle(ep.title, pageTitles);
-            pageTitles.add(t);
-            await tx.page.create({
-              data: {
-                lessonId: ll.id,
-                title: t,
-                contentMd: mode === 'all' ? ep.contentMd : '',
-                tags: ep.tags,
-                sortOrder: ll.pages.length,
-                syncState: SyncState.SYNCED,
-              },
-            });
-            created += 1;
-            continue;
-          }
+          // 本地旧页标 STALE + 改名 {title} (old)
+          const oldTitle = this.resolveTitle(`${lp.title} (old)`, pageTitles);
+          pageTitles.add(oldTitle);
+          pageTitles.delete(lp.title);
+          await tx.page.update({
+            where: { id: lp.id },
+            data: { syncState: SyncState.STALE, title: oldTitle },
+          });
+          staleMarked += 1;
 
-          // 两边都有：structure 模式不动正文；all 模式比对内容
-          if (mode === 'all' && lp.contentMd !== ep.contentMd) {
-            // 幂等保护：若已存在内容一致的 SYNCED 页，视为已同步，跳过
-            const alreadySynced = ll.pages.some(
-              (p) => p.syncState === SyncState.SYNCED && p.contentMd === ep.contentMd,
-            );
-            if (alreadySynced) continue;
-
-            // 本地旧页标 STALE 并改名为 {title} (old)，腾出原标题给新同步页
-            const oldTitle = this.resolveTitle(`${lp.title} (old)`, pageTitles);
-            pageTitles.add(oldTitle);
-            pageTitles.delete(lp.title);
-            await tx.page.update({
-              where: { id: lp.id },
-              data: { syncState: SyncState.STALE, title: oldTitle },
-            });
-            staleMarked += 1;
-            // 新同步页使用外部原标题，确保 countDiff 能匹配到
-            const t = this.resolveTitle(ep.title, pageTitles);
-            pageTitles.add(t);
-            await tx.page.create({
-              data: {
-                lessonId: ll.id,
-                title: t,
-                contentMd: ep.contentMd,
-                tags: ep.tags,
-                sortOrder: ll.pages.length,
-                syncState: SyncState.SYNCED,
-              },
-            });
-            created += 1;
-          } else if (lp.syncState === SyncState.STALE) {
-            // 外部重新出现且内容一致 → 恢复 SYNCED
-            await tx.page.update({
-              where: { id: lp.id },
-              data: { syncState: SyncState.SYNCED },
-            });
-          }
-        }
-
-        // 本地有、外部无的页 → STALE（仅处理原本 SYNCED 的，避免重复计数）
-        const extPageTitles = new Set(el.pages.map((p) => p.title));
-        for (const lp of ll.pages) {
-          if (
-            lp.syncState === SyncState.SYNCED &&
-            !extPageTitles.has(lp.title) &&
-            !pageTitles.has(lp.title)
-          ) {
-            await tx.page.update({
-              where: { id: lp.id },
-              data: { syncState: SyncState.STALE },
-            });
-            staleMarked += 1;
-          }
+          // 新建同步页，按方案 C 迁移 sectionTags（仅保留新 contentMd 中存在的 headingKey）
+          const newTitle = this.resolveTitle(el.title, pageTitles);
+          pageTitles.add(newTitle);
+          const { sectionTags } = this.migrateTags(lp, merged);
+          await tx.page.create({
+            data: {
+              courseId,
+              title: newTitle,
+              contentMd: merged,
+              sectionTags,
+              sortOrder: pages.length,
+              syncState: SyncState.SYNCED,
+            },
+          });
+          created += 1;
+        } else if (lp.syncState === SyncState.STALE) {
+          // 外部重新出现且内容一致 → 恢复 SYNCED
+          await tx.page.update({
+            where: { id: lp.id },
+            data: { syncState: SyncState.SYNCED },
+          });
         }
       }
 
-      // 本地有、外部无的章 → STALE
-      const extLessonTitles = new Set(ext.lessons.map((l) => l.title));
-      for (const ll of tree) {
+      // 本地有、外部无的 Page → STALE
+      const extTitles = new Set(ext.lessons.map((l) => l.title));
+      for (const lp of pages) {
         if (
-          ll.syncState === SyncState.SYNCED &&
-          !extLessonTitles.has(ll.title) &&
-          !matchedLessonIds.has(ll.id)
+          lp.syncState === SyncState.SYNCED &&
+          !extTitles.has(lp.title) &&
+          !matchedIds.has(lp.id)
         ) {
-          await tx.lesson.update({
-            where: { id: ll.id },
+          await tx.page.update({
+            where: { id: lp.id },
             data: { syncState: SyncState.STALE },
           });
           staleMarked += 1;

@@ -12,17 +12,12 @@ export class CoursesService {
     return this.prisma.course.findMany({ orderBy: { createdAt: 'desc' } });
   }
 
-  /** 单个 Course，含下属 Lessons 和 Pages（§5.1.1，按 sortOrder 升序） */
+  /** 单个 Course，含下属 Pages（§5.1.1，按 sortOrder 升序；2026-10-16 扁平化：lessons → pages） */
   async findOne(id: string) {
     const course = await this.prisma.course.findUnique({
       where: { id },
       include: {
-        lessons: {
-          orderBy: { sortOrder: 'asc' },
-          include: {
-            pages: { orderBy: { sortOrder: 'asc' } },
-          },
-        },
+        pages: { orderBy: { sortOrder: 'asc' } },
       },
     });
     if (!course) {
@@ -41,8 +36,8 @@ export class CoursesService {
   }
 
   /**
-   * 删除 Course：级联删除 Lesson 和 Page（schema onDelete: Cascade）。
-   * 删除保护（§5.1.1 注记，2026-10-14 拍板）：存在 Release 历史时拒删，409 CONFLICT。
+   * 删除 Course：级联删除 Page（schema onDelete: Cascade）。
+   * 删除保护（§5.1.1）：存在 Release 历史时拒删，409 CONFLICT。
    */
   async remove(id: string) {
     await this.ensureExists(id);

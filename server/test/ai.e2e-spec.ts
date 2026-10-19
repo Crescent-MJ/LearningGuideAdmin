@@ -42,26 +42,20 @@ describe('AI API (e2e)', () => {
     const course = await prisma.course.create({
       data: {
         title: 'AI-E2E课程',
-        lessons: {
-          create: {
-            title: '同步章',
-            sortOrder: 0,
-            pages: {
-              create: [
-                {
-                  title: '有效页',
-                  contentMd: 'SYNCED-CONTENT $E=mc^2$',
-                  sortOrder: 0,
-                },
-                {
-                  title: '失效页',
-                  contentMd: 'STALE-CONTENT-SHOULD-BE-EXCLUDED',
-                  sortOrder: 1,
-                  syncState: 'STALE',
-                },
-              ],
+        pages: {
+          create: [
+            {
+              title: '有效页',
+              contentMd: '# 有效页\n\nSYNCED-CONTENT $E=mc^2$',
+              sortOrder: 0,
             },
-          },
+            {
+              title: '失效页',
+              contentMd: 'STALE-CONTENT-SHOULD-BE-EXCLUDED',
+              sortOrder: 1,
+              syncState: 'STALE',
+            },
+          ],
         },
       },
     });
@@ -161,20 +155,14 @@ describe('AI API (e2e)', () => {
     const unpublished = await prisma.course.create({
       data: {
         title: 'AI-E2E未发布课',
-        lessons: {
-          create: {
-            title: '章',
-            sortOrder: 0,
-            pages: { create: [{ title: '页', contentMd: 'DRAFT-ONLY', sortOrder: 0 }] },
-          },
-        },
+        pages: { create: [{ title: '页', contentMd: 'DRAFT-ONLY', sortOrder: 0 }] },
       },
     });
     const res = await request(app.getHttpServer())
       .post('/api/ai/chat-stream')
       .send({ courseId: unpublished.id, message: 'hi', mode: 'LECTURE' })
       .expect(400);
-    expect(res.body.error.message).toContain('Publish');
+    expect(res.body.error.message).toContain('Releases');
     await prisma.course.delete({ where: { id: unpublished.id } });
   });
 
