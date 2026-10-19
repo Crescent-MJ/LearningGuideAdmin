@@ -29,50 +29,41 @@ model Course {
   description   String?
   externalId    String? // 对应外部同步源的 ID
   structureJson Json? // 存储树形目录的原始结构，用于快速渲染
-  // 激活版本指针（2026-10-15 拍板，开发文档 §3.4.3/§4.3.3）：AI Tutor 知识库读此
-  // Release 快照；普通标量列，不建 Prisma 外键关系（Release 删除场景由发布保护兜底）
+  // 激活版本指针：AI Tutor 知识库读此 Release 快照；普通标量列，不建 Prisma 外键关系
   currentReleaseId String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  lessons  Lesson[]
+  pages    Page[]
   releases Release[]
   aiConfig CourseAiConfig?
-  // 以下两个为反向关联字段：Prisma 要求双向关系，文档 §2 缺失，为通过校验的最小补充
-  // （不在数据库中新增列；users 为隐式多对多，migrate 时会生成联接表 _CourseToUser）
+  // 反向关联：users 为隐式多对多，migrate 时生成联接表 _CourseToUser
   users          User[]
   aiChatSessions AiChatSession[]
 }
 
-// 第二层：章节 (Lesson)
-model Lesson {
-  id        String  @id @default(uuid())
-  courseId  String
-  course    Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  title     String
-  duration  Int? // 视频/内容预计时长（秒）
-  sortOrder Int // 排序权重
-  syncState SyncState @default(SYNCED) // 外部源同步状态（§3.2.2）
-  pages     Page[]
+// 第二层：页面/内容 (Page)（2026-10-16 扁平化：原 Lesson → Page 合并）
+model Page {
+  id          String  @id @default(uuid())
+  courseId    String
+  course      Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  title       String // 原 Lesson 标题（md 文件标题）
+  contentMd   String  @db.Text // 合并后的 Markdown：各原 Page 以 `# {Page标题}` 为 H1 拼接（Lesson.title 不入内容）
+  sectionTags Json? // H1-H6 级标签映射：{ "h{n}-slug": ["tag1"] }（2026-10-16：移除页面级 tags）
+  sortOrder   Int
+  syncState   SyncState @default(SYNCED) // 外部源同步状态（§3.2.2）
 
   @@index([courseId, sortOrder])
 }
 
-// 第三层：页面/内容 (Page)
-model Page {
-  id       String  @id @default(uuid())
-  lessonId String
-  lesson   Lesson  @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-  title    String
-  contentMd String @db.Text // 核心 Markdown 内容，支持 LaTeX
-  tags     Json? // 标签数组，如 ["Core Knowledge", "Teaching Guidance"]
-  sortOrder Int
-  syncState SyncState @default(SYNCED) // 外部源同步状态（§3.2.2）
-
-  @@index([lessonId, sortOrder])
+// 全局 Tag 词库（2026-10-16 方案 B 轻量版：用户输入新 tag 自动沉淀，颜色自动分配）
+model Tag {
+  id    String @id @default(uuid())
+  name  String @unique // tag 名称（唯一）
+  color String // 预设语义色或自动分配色
 }
 
-// 同步状态枚举（2026-10-14 新增，§3.2.2 外部源接管模型）
+// 同步状态枚举
 enum SyncState {
   SYNCED // 与外部源一致
   STALE // 本地独有或外部已变更，已失效
@@ -88,7 +79,7 @@ model Release {
   course        Course   @relation(fields: [courseId], references: [id])
   versionTag    String // 版本号，格式: "CourseName_YYYYMMDDHHmm"（精确到分钟）
   revisionNotes String   @db.Text // 本次修订的备注
-  snapshotData  Json // 完整内容快照: { lessons: [{ id, title, pages: [{id, title, contentMd, tags}] }] }
+  snapshotData  Json // 完整内容快照: { pages: [{ id, title, contentMd, sectionTags }] }（2026-10-16 扁平化；去 tags）
   createdAt     DateTime @default(now())
 
   @@index([courseId, createdAt])

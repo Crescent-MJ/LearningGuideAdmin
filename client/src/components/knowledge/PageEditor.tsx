@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react'
-import { Alert, App, Dropdown, Empty, Input, Tag } from '../ui'
+import { useEffect, useRef, useState } from 'react'
+import { Alert, App, Button, Dropdown, Empty, Input, Panel, Tag } from '../ui'
 import type { MenuProps } from '../ui'
 import {
   BlockNoteView,
@@ -22,6 +22,7 @@ import '@blocknote/react/style.css'
 import '@blocknote/mantine/style.css'
 import {
   AlignLeftOutlined,
+  EditOutlined,
   FontSizeOutlined,
   UnorderedListOutlined,
   OrderedListOutlined,
@@ -63,6 +64,23 @@ const SAVE_LABEL: Record<string, { text: string; color: string }> = {
   saving: { text: '保存中…', color: 'blue' },
   saved: { text: '已保存', color: 'green' },
   error: { text: '保存失败', color: 'red' },
+}
+
+/** heading 文本转 slug（与后端 sync.service.ts 一致） */
+function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    // 保留 Unicode 字母/数字（含中文），仅去掉标点符号等特殊字符；
+    // 之前用 \w 会把中文全部清空，导致多个中文 heading 生成相同 key（h2-）而碰撞。
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+}
+
+/** 带层级前缀的 heading key：`h{n}-{slug}`（与后端一致，2026-10-16） */
+function headingKey(level: number, text: string): string {
+  return `h${level}-${slugify(text)}`
 }
 
 /**
@@ -167,6 +185,54 @@ function convertMathParagraphs(blocks: any[]): any[] {
 }
 
 /**
+ * 判断文本是否像 LaTeX（用于粘贴时决定是否走公式解析）。
+ * 触发条件（任一）：
+ *  1. 含块级公式 `$$...$$`
+ *  2. 含常见 LaTeX 命令（\frac、\sum、\begin 等）
+ *  3. 含行内 `$...$` 且**内部**含已知 LaTeX 命令
+ * 普通代码（如 $PATH、$var、模板字符串 `$100$` 配 `\d`）不会误判。
+ */
+function looksLikeLatex(text: string): boolean {
+  if (!text) return false
+  // 1. 块级公式
+  if (/\$\$[\s\S]+?\$\$/.test(text)) return true
+  // 2. 常见 LaTeX 命令
+  if (
+    /\\(begin|end|frac|sum|int|prod|lim|sqrt|left|right|alpha|beta|gamma|delta|epsilon|varepsilon|theta|lambda|mu|sigma|pi|infty|cdot|times|div|leq|geq|neq|approx|rightarrow|partial|nabla|mathrm|mathbf|text|over|under|overline|underline)/.test(
+      text,
+    )
+  )
+    return true
+  // 3. 行内公式且内部含 LaTeX 命令（避免 \n \d 等普通转义误判）
+  if (/\$[^$\n]*\\(begin|end|frac|sum|int|prod|lim|sqrt|left|right|alpha|beta|gamma|delta|epsilon|theta|lambda|mu|sigma|pi|infty|cdot|times|leq|geq|neq|approx)[^$\n]*\$/.test(text))
+    return true
+  return false
+}
+
+/**
+ * 从粘贴的 HTML 中提取所有 <pre>/<code> 的纯文本（用 DOMParser 正确处理实体）。
+ * 返回 null 表示 HTML 不含代码块。
+ */
+function extractCodeFromHtml(html: string): string | null {
+  if (!html) return null
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    const pres = Array.from(doc.querySelectorAll('pre'))
+    if (pres.length > 0) {
+      // 拼接所有 pre 的文本，用换行分隔
+      return pres
+        .map((p) => (p.querySelector('code') ?? p).textContent ?? '')
+        .join('\n')
+    }
+    // 无 pre 时取首个 code
+    const code = doc.querySelector('code')
+    return code ? code.textContent : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * 把表格单元格中的 math 行内内容项转回 `$latex$` 文本。
  */
 function tableInlineMathToText(tableContent: any): any {
@@ -251,12 +317,26 @@ function blocksToMarkdownWithMath(editor: any, blocks: any[]): string {
 export function PageEditor() {
   const draft = useKnowledgeStore((s) => s.draft)
   const editDraft = useKnowledgeStore((s) => s.editDraft)
+  const tocScrollTarget = useKnowledgeStore((s) => s.tocScrollTarget)
+  const clearTocScrollTarget = useKnowledgeStore((s) => s.clearTocScrollTarget)
   const { message } = App.useApp()
 
   /** 最后一次加载进块编辑器的 md（用于判断是否需重载） */
   const lastLoadedMd = useRef<string>('')
   /** 加载期间屏蔽 onChange（避免 replaceBlocks 触发无意义保存） */
   const loadingRef = useRef(false)
+  /** 编辑器滚动容器（TOC 定位用） */
+  const scrollRef = useRef<HTMLDivElement>(null)
+  /** 浮动覆盖层容器（scrollRef 的子节点，BlockNote 编辑器的兄弟节点） */
+  const overlayRef = useRef<HTMLDivElement>(null)
+  /** tag 项 DOM 元素引用（key -> element），用于滚动时直接更新位置（不走 React 重渲染） */
+  const tagItemRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+  /** 每个 heading 的 key 列表（仅用于 React 渲染 tag 项；位置由 DOM 直接更新） */
+  const [headingKeys, setHeadingKeys] = useState<string[]>([])
+  /** 标题编辑态（§3.3.1，2026-10-19）：默认展示态（大标题 + 常显铅笔），点击铅笔进入编辑态 */
+  const [editingTitle, setEditingTitle] = useState(false)
+  /** 进入编辑态时的标题备份，Esc 取消时回滚 */
+  const titleBeforeEdit = useRef('')
 
   const editor = useCreateBlockNote({
     schema,
@@ -272,6 +352,75 @@ export function PageEditor() {
     uploadFile: async () => {
       const url = window.prompt('请输入图片 URL（仅支持外链）')
       return { url: url || '' }
+    },
+    /**
+     * 粘贴处理（2026-10-19）：拦截 LaTeX 粘贴，避免被 BlockNote 默认转为 code block。
+     * 必须用 pasteHandler（而非 React onPaste），因为 BlockNote 内部已在 view.dom
+     * 注册原生 paste 监听并 preventDefault，React onPaste 会在其后触发导致重复插入。
+     * 逻辑：
+     *  1. 优先看 text/plain，若像 LaTeX 则解析插入并 return true
+     *  2. 否则看 text/html 的 <pre>/<code> 内容，若像 LaTeX 则用该文本
+     *  3. 其余情况 return defaultPasteHandler()（普通文本/代码/富文本走默认）
+     * 解析复用 editor.tryParseMarkdownToBlocks + convertMathParagraphs，
+     * `$$...$$` → mathBlock，`$...$` → 行内公式。
+     */
+    pasteHandler: ({ event, defaultPasteHandler }) => {
+      const plain = event.clipboardData?.getData('text/plain')
+      if (!plain) return defaultPasteHandler()
+      const html = event.clipboardData?.getData('text/html') || ''
+
+      let textToParse: string | null = null
+      // 1. 纯文本本身像 LaTeX（VSCode 复制源码场景）
+      if (looksLikeLatex(plain)) {
+        textToParse = plain
+      } else if (html) {
+        // 2. HTML 代码块里的内容像 LaTeX（网页代码块场景）
+        const codeText = extractCodeFromHtml(html)
+        if (codeText && looksLikeLatex(codeText)) {
+          textToParse = codeText
+        }
+      }
+      if (!textToParse) return defaultPasteHandler() // 非 LaTeX，走默认
+
+      try {
+        const raw = editor.tryParseMarkdownToBlocks(textToParse)
+        const blocks = convertMathParagraphs(raw)
+        if (blocks.length === 0) return defaultPasteHandler() // 空内容回退默认
+
+        const pos = editor.getTextCursorPosition()
+        const currentBlock = pos?.block
+        let inserted: any[] = []
+        if (currentBlock) {
+          // 当前是空段落 → 替换；否则插在当前块之后
+          const content = currentBlock.content as any[] | undefined
+          const isEmptyParagraph =
+            currentBlock.type === 'paragraph' &&
+            (!content ||
+              content.length === 0 ||
+              (content.length === 1 && !content[0].text))
+          if (isEmptyParagraph) {
+            inserted = editor.replaceBlocks([currentBlock], blocks as never)
+              .insertedBlocks
+          } else {
+            inserted = editor.insertBlocks(blocks as never, currentBlock, 'after')
+          }
+        } else {
+          // 无光标块（空文档），追加到末尾
+          const doc = editor.document
+          const ref = doc[doc.length - 1]
+          if (ref) {
+            inserted = editor.insertBlocks(blocks as never, ref, 'after')
+          }
+        }
+        // 用插入返回的带 id 块定位光标（convertMathParagraphs 产出的块无 id）
+        const last = inserted[inserted.length - 1]
+        if (last) editor.setTextCursorPosition(last as never, 'end')
+        editor.focus()
+        return true
+      } catch {
+        message.warning('粘贴内容解析失败，请重试')
+        return true
+      }
     },
   })
 
@@ -312,12 +461,125 @@ export function PageEditor() {
     }
   }, [draft, editor, message])
 
+  /** TOC 滚动定位：点击树中 heading 后，滚动编辑器到对应标题块 */
+  useEffect(() => {
+    if (!tocScrollTarget || !scrollRef.current) return
+    const target = tocScrollTarget.trim()
+    const hEls = scrollRef.current.querySelectorAll('h1,h2,h3,h4,h5,h6')
+    for (const h of Array.from(hEls)) {
+      if (h.textContent?.trim() === target) {
+        h.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        break
+      }
+    }
+    clearTocScrollTarget()
+  }, [tocScrollTarget, clearTocScrollTarget])
+
+  /** H1-H6 section tags：浮动覆盖层方案。
+   *  绝不修改 BlockNote 的 DOM，只在 overlay（编辑器的兄弟节点）里渲染 tag 按钮。
+   *  关键：overlay 用 position:absolute; top:0; left:0; right:0（无 bottom），
+   *  这样 overlay 随内容一起滚动，tag 按钮天然跟随 heading，
+   *  不需要 scroll 事件更新位置 → 彻底消除滚动偏移。
+   *  React 只在 heading 数量/key 变化时重渲染（新增/删除标题块）。 */
+  useEffect(() => {
+    if (!draft || !scrollRef.current) return
+
+    /** 计算并写入所有 tag 项的位置（相对于 scrollRef 内容顶部） */
+    const updateTagPositions = () => {
+      const root = scrollRef.current
+      if (!root) return
+      const rootRect = root.getBoundingClientRect()
+      const headings = root.querySelectorAll('h1,h2,h3,h4,h5,h6')
+      for (const h of Array.from(headings)) {
+        const text = h.textContent?.trim()
+        if (!text) continue
+        const level = Number(h.tagName.substring(1))
+        const key = headingKey(level, text)
+        const el = tagItemRefs.current.get(key)
+        if (!el) continue
+        const hr = h.getBoundingClientRect()
+        // overlay 随内容滚动，所以 top/left 取 heading 相对内容顶部的偏移
+        el.style.top = `${hr.top - rootRect.top + root.scrollTop}px`
+        el.style.left = `${hr.right - rootRect.left + root.scrollLeft + 8}px`
+      }
+    }
+
+    /** 更新 heading key 列表（React 渲染 tag 项用）+ 位置 */
+    const syncHeadings = () => {
+      const root = scrollRef.current
+      if (!root) return
+      const headings = root.querySelectorAll('h1,h2,h3,h4,h5,h6')
+      const keys: string[] = []
+      for (const h of Array.from(headings)) {
+        const text = h.textContent?.trim()
+        if (!text) continue
+        const level = Number(h.tagName.substring(1))
+        keys.push(headingKey(level, text))
+      }
+      setHeadingKeys((prev) => {
+        if (prev.length === keys.length && prev.every((k, i) => k === keys[i])) return prev
+        return keys
+      })
+      updateTagPositions()
+    }
+
+    // 初始 + BlockNote 渲染后
+    const raf = requestAnimationFrame(syncHeadings)
+
+    // 只读 MutationObserver：BlockNote 内容变化时同步 heading 列表。
+    // 忽略 overlay 内部的变化。
+    const observer = new MutationObserver((mutations) => {
+      const overlay = overlayRef.current
+      for (const m of mutations) {
+        if (overlay && (overlay === m.target || overlay.contains(m.target))) continue
+        syncHeadings()
+        break
+      }
+    })
+    observer.observe(scrollRef.current, { childList: true, subtree: true, characterData: true })
+
+    // 窗口缩放时重算位置（布局可能变化）
+    window.addEventListener('resize', updateTagPositions)
+
+    return () => {
+      cancelAnimationFrame(raf)
+      observer.disconnect()
+      window.removeEventListener('resize', updateTagPositions)
+    }
+  }, [draft, draft?.pageId, draft?.contentMd, draft?.sectionTags])
+
+  /** headingKeys 变化后（tag 元素刚挂载），更新一次位置 */
+  useEffect(() => {
+    if (!draft) return
+    const raf = requestAnimationFrame(() => {
+      const root = scrollRef.current
+      const overlay = overlayRef.current
+      if (!root || !overlay) return
+      const rootRect = root.getBoundingClientRect()
+      const headings = root.querySelectorAll('h1,h2,h3,h4,h5,h6')
+      for (const h of Array.from(headings)) {
+        const text = h.textContent?.trim()
+        if (!text) continue
+        const level = Number(h.tagName.substring(1))
+        const key = headingKey(level, text)
+        const el = tagItemRefs.current.get(key)
+        if (!el) continue
+        const hr = h.getBoundingClientRect()
+        el.style.top = `${hr.top - rootRect.top + root.scrollTop}px`
+        el.style.left = `${hr.right - rootRect.left + root.scrollLeft + 8}px`
+      }
+    })
+    return () => cancelAnimationFrame(raf)
+  }, [draft, headingKeys])
+
   if (!draft) {
+    // 空状态同样套内容面板（2026-10-19 修正）：确保未选中页面时内容区仍显示白色圆角面板，三区外观统一
     return (
-      <Empty
-        description="从左侧目录树选择一个页面开始编辑"
-        style={{ marginTop: 120 }}
-      />
+      <Panel
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      >
+        <Empty description="从左侧目录树选择一个页面开始编辑" />
+      </Panel>
     )
   }
 
@@ -363,6 +625,9 @@ export function PageEditor() {
         { key: 'heading1', label: '一级标题' },
         { key: 'heading2', label: '二级标题' },
         { key: 'heading3', label: '三级标题' },
+        { key: 'heading4', label: '四级标题' },
+        { key: 'heading5', label: '五级标题' },
+        { key: 'heading6', label: '六级标题' },
       ],
     },
     { key: 'bulletListItem', label: '无序列表', icon: <UnorderedListOutlined /> },
@@ -390,30 +655,87 @@ export function PageEditor() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    // 内容面板（2026-10-19 对齐 Figma）：白色/圆角12/无边框/卡片阴影，与 AI Tutor、Releases 统一
+    <Panel style={{ display: 'flex', flexDirection: 'column' }}>
+      {/* 标题区（§3.3.1，2026-10-19 改）：默认展示态（大标题 + 常显铅笔按钮），点击铅笔就地变输入框 */}
       <div
         style={{
           display: 'flex',
-          gap: tokens.spacing.md,
+          gap: tokens.spacing.sm,
           alignItems: 'center',
           marginBottom: tokens.spacing.sm,
-          flexWrap: 'wrap',
+          paddingBottom: tokens.spacing.sm,
+          borderBottom: `1px solid ${tokens.color.border}`,
         }}
       >
-        <Input
-          variant="filled"
-          style={{
-            flex: 1,
-            minWidth: 200,
-            fontSize: tokens.fontSize['2xl'],
-            fontWeight: tokens.fontWeight.semibold,
-          }}
-          value={draft.title}
-          onChange={(e) => editDraft({ title: e.target.value })}
-          placeholder="页面标题"
-        />
-        <TagManager tags={draft.tags} onChange={(tags) => editDraft({ tags })} />
-        {save.text && <Tag color={save.color}>{save.text}</Tag>}
+        {editingTitle ? (
+          <Input
+            autoFocus
+            style={{
+              flex: 1,
+              minWidth: 0,
+              fontSize: 30,
+              fontWeight: tokens.fontWeight.bold,
+              lineHeight: '36px',
+              // Figma 1.1 Page Editor：标题纯黑 #000000
+              color: '#000000',
+            }}
+            value={draft.title}
+            onChange={(e) => editDraft({ title: e.target.value })}
+            onPressEnter={() => setEditingTitle(false)}
+            onBlur={() => setEditingTitle(false)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                // Esc 取消：回滚到进入编辑前的标题
+                editDraft({ title: titleBeforeEdit.current })
+                setEditingTitle(false)
+              }
+            }}
+            // 空标题文案与展示态回退（下方 draft.title 为空时）保持统一
+            placeholder="未命名页面"
+          />
+        ) : (
+          <>
+            <div
+              style={{
+                minWidth: 0,
+                fontSize: 30,
+                fontWeight: tokens.fontWeight.bold,
+                lineHeight: '36px',
+                // Figma 1.1 Page Editor：标题纯黑 #000000
+                color: '#000000',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {draft.title || '未命名页面'}
+            </div>
+            <Button
+              type="text"
+              aria-label="编辑标题"
+              title="编辑标题"
+              icon={<EditOutlined style={{ fontSize: 16 }} />}
+              onClick={() => {
+                titleBeforeEdit.current = draft.title
+                setEditingTitle(true)
+              }}
+              // 对齐 Figma：20×20 容器包 16×16 铅笔图标
+              style={{
+                width: 20,
+                height: 20,
+                minWidth: 20,
+                padding: 0,
+                color: tokens.color.text.tertiary,
+              }}
+            />
+          </>
+        )}
+        {save.text && (
+          <Tag color={save.color} style={{ marginLeft: 'auto' }}>
+            {save.text}
+          </Tag>
+        )}
       </div>
       {draft.saveState === 'error' && (
         <Alert
@@ -424,13 +746,15 @@ export function PageEditor() {
         />
       )}
       <div
+        ref={scrollRef}
         data-color-mode="light"
         style={{
           flex: 1,
           minHeight: 0,
           overflow: 'auto',
           border: `1px solid ${tokens.color.border}`,
-          borderRadius: tokens.radius.sm,
+          borderRadius: tokens.radius.md,
+          position: 'relative',
           // 左侧留出 sideMenu（拖拽手柄+添加按钮）空间，防止被裁剪
           paddingLeft: tokens.spacing['2xl'],
         }}
@@ -452,8 +776,48 @@ export function PageEditor() {
             />
           </div>
         </Dropdown>
+        {/* H1-H6 section tags 浮动覆盖层：绝不修改 BlockNote DOM，
+            tag 按钮绝对定位浮在每个 heading 右侧，位置由滚动/编辑时直接更新 DOM。 */}
+        <div
+          ref={overlayRef}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            pointerEvents: 'none',
+            zIndex: 5,
+          }}
+        >
+          {headingKeys.map((key) => (
+            <div
+              key={key}
+              ref={(el) => {
+                if (el) tagItemRefs.current.set(key, el)
+                else tagItemRefs.current.delete(key)
+              }}
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                pointerEvents: 'auto',
+              }}
+            >
+              <TagManager
+                compact
+                tags={draft?.sectionTags?.[key] || []}
+                onChange={(tags) => {
+                  const sectionTags = { ...(draft?.sectionTags || {}) }
+                  if (tags.length) sectionTags[key] = tags
+                  else delete sectionTags[key]
+                  editDraft({ sectionTags })
+                }}
+              />
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
+    </Panel>
   )
 }
 

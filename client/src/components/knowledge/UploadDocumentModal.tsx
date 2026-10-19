@@ -11,17 +11,18 @@ import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import { tokens } from '../../theme/tokens'
 
 /**
- * 「上传并解析」两步弹窗（§3.2.3，2026-10-15 按用户设计稿）：
+ * 「上传并解析」两步弹窗（§3.2.3）：
  * ① 选择文件（拖拽/Browse，前端预校验白名单+15MB）
- * ② POST /api/files/convert 本地转换 → 预览 Markdown → Import 经 §5.1.3 建页
+ * ② POST /api/files/convert 本地转换 → 预览 Markdown → Import 经 §5.1.2 建页
  * 转换阶段不建页、Cancel 不落任何数据。
+ * 2026-10-16 扁平化：目标为 Course（无 Lesson 层）。
  */
 export function UploadDocumentModal({
   target,
   onClose,
 }: {
-  /** 上传目标 Lesson；null 关闭 */
-  target: { courseId: string; lessonId: string; lessonTitle: string } | null
+  /** 上传目标 Course；null 关闭 */
+  target: { courseId: string; courseTitle: string } | null
   onClose: () => void
 }) {
   const { message } = App.useApp()
@@ -79,7 +80,7 @@ export function UploadDocumentModal({
     if (!file || !converted || !target) return
     setImporting(true)
     try {
-      await importDocument(target.courseId, target.lessonId, {
+      await importDocument(target.courseId, {
         title: converted.title,
         contentMd: converted.markdown,
       })
@@ -122,7 +123,7 @@ export function UploadDocumentModal({
             marginBottom: tokens.spacing.sm,
           }}
         >
-          目标章节：{target.lessonTitle}
+          目标课程：{target.courseTitle}
         </div>
       )}
       {step === 1 ? (

@@ -49,6 +49,10 @@
 
 > 注意：以下 Schema 为最终版，Agent 开发前必须严格按此创建并执行 `prisma migrate dev`。
 > 实装锁定 Prisma 6.x（v7 起移除 `url=env()` 写法，2026-10-14 拍板暂锁 6.x；双向关系已按 Prisma 要求补齐）。
+>
+> **2026-10-16 结构扁平化改拍**：原三级 Course→Lesson→Page 简化为两级 Course→Page。
+> Lesson（文件夹）层删除：原 Lesson 标题变为 Page.title（md 文件标题），原 Lesson 下属各 Page 的内容合并为该 Page 的 contentMd，以 `# {原Page标题}` 作为 H1 section 拼接。
+> Page 新增 `sectionTags`（Json）：按 heading（H1-H6，2026-10-19 由 H1/H2/H3 扩展）slug 映射用户自定义 tags，用于 AI 投喂时的语义标注。
 
 ```prisma
 // ==========================================
@@ -69,49 +73,41 @@ model Course {
   description     String?
   externalId      String?   // 对应外部同步源的 ID
   structureJson   Json?     // 存储树形目录的原始结构，用于快速渲染
-  currentReleaseId String?  // 激活版本指针（2026-10-15 拍板，§3.4.3/§4.3.3）：AI Tutor 知识库
-                             // 即读此 Release 快照；为普通标量列，不建 Prisma 外键关系
+  currentReleaseId String?  // 激活版本指针（§3.4.3/§4.3.3）：AI Tutor 知识库读此 Release 快照
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  lessons         Lesson[]
+  pages           Page[]
   releases        Release[]
   aiConfig        CourseAiConfig?
-  // 反向关联（Prisma 双向关系要求，2026-10-14 补齐）：users 为隐式多对多，
-  // migrate 时生成联接表 _CourseToUser（2026-10-14 拍板方案 a）
+  // 反向关联（Prisma 双向关系要求）：users 为隐式多对多，
+  // migrate 时生成联接表 _CourseToUser
   users           User[]
   aiChatSessions  AiChatSession[]
 }
 
-// 第二层：章节 (Lesson)
-model Lesson {
-  id          String    @id @default(uuid())
-  courseId    String
-  course      Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  title       String
-  duration    Int?      // 视频/内容预计时长（秒）
-  sortOrder   Int       // 排序权重
-  syncState   SyncState @default(SYNCED) // 外部源同步状态（§3.2.2）
-  pages       Page[]
+// 第二层：页面/内容 (Page)（2026-10-16 扁平化：原 Lesson → Page 合并）
+model Page {
+  id            String    @id @default(uuid())
+  courseId      String
+  course        Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  title         String    // 原 Lesson 标题（md 文件标题）
+  contentMd     String    @db.Text  // 合并后的 Markdown：各原 Page 以 `# {Page标题}` 为 H1 拼接（Lesson.title 不入内容）
+  sectionTags   Json?     // H1-H6 级标签映射：{ "h1-slug": ["tag1"] }（2026-10-16：移除页面级 tags，仅保留 section tags 用于 AI 语义标注；2026-10-19：标签范围由 H1/H2/H3 扩展至 H1-H6）
+  sortOrder     Int
+  syncState     SyncState @default(SYNCED) // 外部源同步状态（§3.2.2）
 
   @@index([courseId, sortOrder])
 }
 
-// 第三层：页面/内容 (Page)
-model Page {
-  id          String    @id @default(uuid())
-  lessonId    String
-  lesson      Lesson    @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-  title       String
-  contentMd   String    @db.Text  // 核心 Markdown 内容，支持 LaTeX
-  tags        Json?     // 标签数组，如 ["Core Knowledge", "Teaching Guidance"]
-  sortOrder   Int
-  syncState   SyncState @default(SYNCED) // 外部源同步状态（§3.2.2）
-
-  @@index([lessonId, sortOrder])
+// 全局 Tag 词库（2026-10-16 方案 B 轻量版：用户输入新 tag 自动沉淀，颜色自动分配）
+model Tag {
+  id      String @id @default(uuid())
+  name    String @unique  // tag 名称（唯一）
+  color   String          // 预设语义色（antd preset）或自动分配色
 }
 
-// 同步状态枚举（2026-10-14 新增，§3.2.2 外部源接管模型）
+// 同步状态枚举（§3.2.2 外部源接管模型）
 enum SyncState {
   SYNCED  // 与外部源一致
   STALE   // 本地独有或外部已变更，已失效（置灰，不作 AI Tutor 知识库）
@@ -125,9 +121,9 @@ model Release {
   id              String    @id @default(uuid())
   courseId        String
   course          Course    @relation(fields: [courseId], references: [id])
-  versionTag      String    // 版本号，格式: "CourseName_YYYYMMDDHHmm"（精确到分钟，2026-10-15 拍板去秒）
+  versionTag      String    // 版本号，格式: "CourseName_YYYYMMDDHHmm"（精确到分钟）
   revisionNotes   String    @db.Text  // 本次修订的备注
-  snapshotData    Json      // 完整内容快照: { lessons: [{ id, title, pages: [{id, title, contentMd, tags}] }] }
+  snapshotData    Json      // 完整内容快照: { pages: [{ id, title, contentMd, sectionTags }] }（2026-10-16 扁平化；去 tags）
   createdAt       DateTime  @default(now())
 
   @@index([courseId, createdAt])
@@ -208,59 +204,81 @@ model AiChatSession {
 
 ### 3.1 功能概述
 
-Knowledge System 是系统的主界面，采用左右两栏布局：
+Knowledge System 是系统的主界面，采用「顶部整宽 Tab 栏 + 下方左右两栏」布局：
 
-- **左侧**：课程目录树（Course -> Lesson -> Page），搜索框，Sync 按钮
-- **右侧**：Tab 页签，包含 "Knowledge Pages"（编辑器）和 "Publish"（版本发布）
+- **顶部（整宽 Tab 栏）**："Knowledge Pages"（编辑器，含左侧 TOC）与 "Releases"（版本发布，2026-10-19 由 "Publish" 更名）两个 Tab，横跨下方整行、位于课程树列（含同步目标）**上方**
+- **下方左侧**：课程目录树（Course → Page → Heading），搜索框，Sync 按钮（**仅 "Knowledge Pages" Tab 显示**；"Releases" Tab 下隐藏整个课程树栏，仅保留最左侧模块导航列 Knowledge/AI Tutor）
+- **下方右侧**：当前 Tab 对应的内容（编辑器 / 版本发布）
 
-> **Phase 4 排版对齐注记（2026-10-14，按用户设计稿）**：整体为「顶部 Header + 模块导航列 + 课程树列 + 内容区」四段——Header 白底，左侧 logo+产品名、右侧通知铃铛与当前用户（演示身份静态占位）；模块导航列含 **Knowledge / AI Tutor** 两个入口（当前模块高亮，AI Tutor 为 Phase 6 占位页）；树列顶部搜索框、底部 Sync 按钮（Sync Structure Only 为文字链样式、Sync Structure & Course 为主色按钮）；预设标签配色：Core Knowledge 蓝 / Teaching Guidance 绿 / Misconception 橙 / Assessment 紫。
+> **2026-10-19 布局改拍**（对齐 Figma 帧 `1.1 Page Editor` 节点 665:543）：原 Tab 页签位于右侧内容列内、与左侧课程树列并排且略低于「同步目标」；现提升为**跨「课程树列 + 内容区」的整宽 Tab 栏**，置于同步目标上方。Tab 样式对齐 Figma：激活态主色 `#145CFF`、字号 16px/字重 600、底部 2px 激活下划线 + 整条底边线；非激活态 `#000000`。
+
+> **2026-10-19 Releases Tab 调整**（用户裁决）：Tab 2 名称 `Publish` → **`Releases`**；列表上方新增标题行 `Knowledge Releases`；列 `Current Version` → `Latest Release`；Action 按钮 `Publish` → `Create Release`；`Releases` Tab 下隐藏左侧课程树栏（同步目标 / 课程树 / Sync 按钮），仅保留最左侧模块导航列。
+
+> **2026-10-19 内容面板样式统一**（用户裁决「完全按 Figma」，覆盖 Knowledge Pages / Knowledge Releases / AI Tutor 三区）：所有页面**主内容区统一为白色内容面板**——填充 `#FFFFFF`、圆角 **12px**（`radius.lg`）、**无边框**、阴影 `shadow.card`（`0 1px 2px -1px rgba(0,0,0,.1), 0 1px 3px rgba(0,0,0,.1)`），置于页面底色 `#F8FAFC` 之上；**子内容块**（文本框/表格/公式区/下拉）圆角统一 **8px**（`radius.md`）；**输入类控件**（输入框/文本域/下拉）描边统一 `1px #E2E8F0`、底色 `#FAFBFC`（经主题 `components.Input/Select` 注入，token `color.inputBorder`/`color.inputBg`）。实现：AntD `Card` 封装层默认改为无边框 + 卡片阴影（圆角由主题 `borderRadiusLG=12` 提供），非 Card 区域（编辑器 / Releases）使用新增 `ui/Panel` 封装，输入类规格经 ConfigProvider `components` 注入；**不改动任何页面内容与布局结构**。
+> **2026-10-19 左侧课程树列卡片化**（用户追加）：左侧课程树列（同步目标 / 课程树 / Sync 按钮）同样卡片化——`MainLayout` 的 `Sider` 去掉右边框、底色改为页面底色 `#F8FAFC` 并加内边距 `spacing.lg`，`Sidebar` 根节点改为 `ui/Panel`，使该列在灰底上**悬浮为白色圆角卡片**，与右侧内容面板**对称统一**（三段式骨架与页面底色均不变）。
+
+> **2026-10-16 扁平化改拍**：原三级 Course→Lesson→Page 简化为两级 Course→Page。
+> Lesson（文件夹）层删除：原 Lesson 标题变为 Page.title（md 文件标题），原 Lesson 下属各 Page 合并为该 Page 的 contentMd，各原 Page 标题作为 H1 section。
+> 树结构扩展为 Course → Page → Heading（H1-H6）三级，Heading 级作为目录（TOC），点击可定位编辑器。
+> **2026-10-19 层级扩展改拍**：Heading/TOC/标签支持范围由 H1/H2/H3 扩展至 **H1-H6**（BlockNote heading schema 原生支持 6 级，块编辑器右键插入菜单同步放开 H4-H6；sectionTags 迁移与 AI 上下文分段正则由 `#{1,3}` 放宽为 `#{1,6}`）。
+
+> **Phase 4 排版对齐注记（2026-10-14，按用户设计稿）**：整体为「顶部 Header + 模块导航列 + 课程树列 + 内容区」四段——Header 白底，左侧 logo+产品名、右侧通知铃铛与当前用户（演示身份静态占位）；模块导航列含 **Knowledge / AI Tutor** 两个入口（当前模块高亮）；树列顶部搜索框、底部 Sync 按钮；预设标签配色：Core Knowledge 蓝 / Teaching Guidance 绿 / Misconception 橙 / Assessment 紫。
+
+> **2026-10-19 模块导航列可收起**（用户裁决，完全收起隐藏；形态更新为**半圆括号式贴边把手**）：最左侧模块导航列（Knowledge / AI Tutor）新增收起/展开按钮——按钮为**半圆括号式贴边把手**（外侧整边圆弧、内侧平直，约 22×48），紧贴该列**右边缘垂直居中**（不跨边界）；点击后整列向左滑出隐藏（宽 160 → 0，带 0.2s 过渡），把手随停靠到最左边缘作为展开入口；方向符号用文本 **❮ / ❯**（fontSize 16 / fontWeight 700，加粗放大，随状态切换）。收起状态由 `MainLayout` 本地 state 维护，不改动 `ModuleNav` 组件本身。
 
 ### 3.2 左侧边栏（Sidebar）
 
-#### 3.2.1 树形导航组件
+#### 3.2.1 树形导航组件（2026-10-16 扁平化 + TOC）
 
-- 实现三级嵌套树形组件：Course（一级）-> Lesson（二级）-> Page（三级）
-- **树按同步目标过滤（2026-10-15 用户裁决）**：树中只显示当前同步目标对应的本地课程（经 `GET /api/sync/external-courses` 的 `localCourseId` 映射）；目标尚未同步（无本地课程）时显示空态提示「该课程尚未同步，点击下方 Sync 拉取」。不再一次展示全部本地课程
-- Course 节点展开/收起（2026-10-15 改）：**隐藏 AntD Tree 原生左侧箭头**（`display:none` 不占位，课程名顶栏最左），点击课程行任意位置即展开/收起；行尾（⋮ 菜单左侧）放旋转 chevron（收起 ▸ / 展开 ▾）作为可展开提示，配合整行 hover 高亮
-- 节点图标（📖/📁/📄）不用 AntD `showIcon`，改在自定义行内渲染（避免图标与标题换行错位）；层级缩进收紧（indent 16px），Course 顶左、Lesson/Page 逐级缩进（2026-10-15 格式修正）
-- Page 节点可点击选中，选中后右侧编辑器加载该 Page 的 Markdown 内容
-- 支持搜索框，按页面标题过滤树节点
-- Lesson 节点悬停菜单含「**上传文档建页**」（见 §3.2.3）
+- 实现三级嵌套树形组件：Course（一级）→ Page（二级，原 Lesson）→ Heading（三级，contentMd 中的 H1-H6，2026-10-19 扩展）
+- **树按同步目标过滤**：树中只显示当前同步目标对应的本地课程；目标尚未同步时显示空态提示
+- Course 节点**默认始终展开、不可折叠**，不显示展开箭头（2026-10-19 改）
+- Page 节点点击→打开编辑器；点击行尾 chevron→展开其下 Heading 目录（TOC）
+- Heading 节点（H1-H6，2026-10-19 扩展）点击→编辑器滚动定位到对应块（TOC 功能，2026-10-16 新增）
+- 节点图标行内渲染；层级缩进收紧为 16px
+- 支持搜索框，**匹配 Page 标题 + 全部 Heading（H1-H6）**（2026-10-19 改：原仅按标题过滤，且无结果时整棵树空白）。匹配范围**仅标题与 heading，不含正文**；命中规则：**标题命中→显示该页全部 Heading；仅 Heading 命中→只显示匹配的 Heading**；命中分支自动展开；点击命中的 Heading 直接定位（跨文件自动切换并滚动）；**无匹配结果时树区域显示「无匹配结果」空态提示**；搜索过滤时禁用拖拽排序
+- **Course 节点悬停菜单**：新建页面、**上传文档建页**（见 §3.2.3）、删除课程（2026-10-19 改：上传入口从 Page 移至 Course）
+- **Page 节点悬停菜单**：删除页面（2026-10-19 改：移除新建页面 / 上传文档建页）
+- **Page 节点支持拖拽排序（2026-10-19 新增）**：鼠标悬停时行左侧显示拖拽把手（⣿），按住把手拖动即可调整 Page 在**同一 Course 内**的先后顺序；拖拽结束立即经 §5.1.2「批量排序接口」持久化 `sortOrder`；排序对全部 Page 生效（含外部同步页；再次执行同步结构可能被外部源覆盖）
 
 #### 3.2.2 Sync 同步（外部源接管模型）
 
-> **设计改拍（2026-10-14，Phase 4 用户裁决）**：原「全量强制覆盖」语义改为**非破坏性外部源接管模型**。外部源是课程主数据（master），本地在同步结果上做修改；再次同步**绝不覆盖或丢失本地内容**，过期内容以「灰度失效」标记交用户处置。
+> **设计改拍（2026-10-14）**：原「全量强制覆盖」语义改为**非破坏性外部源接管模型**。外部源是课程主数据（master），本地在同步结果上做修改；再次同步**绝不覆盖或丢失本地内容**，过期内容以「灰度失效」标记交用户处置。
+>
+> **2026-10-16 扁平化改拍**：外部源仍为 Course→Lesson→Page 三级，本地为 Course→Page 两级。同步时将外部一个 Lesson 映射为本地一个 Page（contentMd = `# {Lesson.title}` + 各外部 Page 以 `# {Page.title}` 为 H1 拼接）。
 
-**同步目标选取**：Sidebar 顶部为**外部课程选择器**（下拉列出外部源课程，带状态：未同步 / 已同步 / 有更新）。**选中即切换、无锁定/解锁机制（2026-10-15 用户裁决，原「锁定防误切」机制移除）**：切换目标前自动 `flushSave` 落盘当前草稿，树与编辑器随之切到新目标课程，并**自动选中该课程上次编辑的页面**（前端按 courseId 记忆 lastPageId；无记忆或课程为空则不选）。未选中时两个 Sync 按钮禁用。原「新建课程」入口**彻底移除**——所有课程来自外部源同步。
+**同步目标选取**：Sidebar 顶部为**外部课程选择器**（下拉列出外部源课程，带状态）。**选中即切换、无锁定机制**：切换目标前自动 `flushSave` 落盘当前草稿，树与编辑器随之切到新目标课程，并**自动选中该课程上次编辑的页面**。未选中时两个 Sync 按钮禁用。原「新建课程」入口**彻底移除**——所有课程来自外部源同步。
 
 **两个按钮**：
 
 | 按钮 | 接口 | 行为 |
 |------|------|------|
-| Sync Structure Only | POST /api/sync/structure `{ externalId }` | 仅同步目录树结构（章节/页面标题、排序、增删节点），不写入正文 |
+| Sync Structure Only | POST /api/sync/structure `{ externalId }` | 仅同步目录树结构（页面标题、排序、增删节点），不写入正文 |
 | Sync Structure & Course | POST /api/sync/all `{ externalId }` | 同步结构 + 内容（非破坏性，见下表） |
 
-**同步算法（按标题匹配外部↔本地节点）**：
+**同步算法（按 Lesson.title 匹配外部 Lesson ↔ 本地 Page）**：
 
 | 情形 | 行为 |
 |------|------|
-| 外部有、本地无 | 新增；标题冲突按 `标题-new`、`标题-new2` 递增 |
-| 两边都有、标题与内容一致 | 不动；全部一致返回 `unchanged`，前端提示「已与外部源一致，无变更」 |
-| 标题一致但外部内容变了 | 本地页 `syncState=STALE`（内容保留、可复制、交用户删除），外部新内容作为新页插入（走冲突命名） |
-| 本地有、外部无 | 本地节点 `syncState=STALE`，交用户删除 |
+| 外部有、本地无 | 新增 Page（contentMd 按上述规则拼接）；标题冲突按 `标题-new` 递增 |
+| 两边都有、合并后 contentMd 一致 | 不动；全部一致返回 `unchanged` |
+| Lesson.title 一致但合并 contentMd 变了 | 本地 Page 整体 `syncState=STALE` 并改名为 `{title} (old)`；新建 Page 装入外部最新合并内容 |
+| 本地有、外部无 | 本地 Page `syncState=STALE`，交用户删除 |
 
-**STALE（灰度失效）节点**：树中置灰 + Tooltip「该节点与外部源不同步，不会作为 AI Tutor 知识库使用；请复制所需内容后删除」。AI Tutor 侧过滤逻辑属 Phase 6。
+**方案 C：sectionTags 迁移（2026-10-16 拍板）**：同步新建 Page 时，若对应 STALE 旧 Page 存在 `sectionTags`，按带层级前缀的 heading slug（`h{n}-slug`，小写、空格转 `-`、去特殊字符）匹配迁移——slug 相同的 tags 搬到新 Page，slug 不存在的（heading 文本改了）丢弃。
 
-**响应**：`{ created, staleMarked, unchanged }` 变更摘要，供前端 message 提示（非破坏性模型下已有节点从不被 update，故无 updated 字段）。
+**STALE（灰度失效）节点**：树中置灰 + Tooltip。AI Tutor 快照过滤 STALE 节点。
 
-> **Mock 实现（2026-10-14）**：外部源为后端内存 fixture（`server/src/sync/demo-fixtures.ts`），真实外部 API 接入（§12 事项 #4）后替换数据源、同步算法不变。
+**响应**：`{ created, staleMarked, unchanged }` 变更摘要。
+
+> **Mock 实现**：外部源为后端内存 fixture（`server/src/sync/demo-fixtures.ts`），真实外部 API 接入后替换数据源、同步算法不变。
 
 #### 3.2.3 上传文档建页（2026-10-15 实现落地；同日按用户设计稿改为两步弹窗「Upload and Parse」）
 
-- **入口**：树中 Lesson 节点悬停菜单「上传文档建页」→ 打开弹窗（不再直接调系统文件选择器）
+- **入口**：树中 Page 节点悬停菜单「上传文档建页」→ 打开弹窗（不再直接调系统文件选择器）
 - **弹窗两步**（按用户设计稿）：
-  1. **选择文件**：虚线拖拽区（Drag and drop file, or Browse）+ 文件 chip；前端预校验（扩展名白名单 + ≤15MB，§10.1）；文案按**实际白名单 8 格式**显示（设计稿中 xls/doc/epub/ppt 不支持，2026-10-15 确认按拍板白名单）；Next 进入解析
-  2. **转换预览**：`POST /api/files/convert`（仅 multipart `file`）→ 后端二次校验 → markitdown-ts **本地**转换（§12 事项 #3 拍板，不调外部服务）→ 弹窗内预览返回的 Markdown 内容；**Import** 才真正建页：复用 `POST /api/lessons/:lessonId/pages`（§5.1.3）以 `{ title, contentMd: markdown }` 新建 Page（标题=文件名去扩展名，`syncState=SYNCED`）→ 前端刷新树并自动选中进编辑器
+  1. **选择文件**：虚线拖拽区（Drag and drop file, or Browse）+ 文件 chip；前端预校验（扩展名白名单 + ≤15MB，§10.1）；文案按**实际白名单 10 格式**显示（设计稿中 epub/ppt 不支持；xls/doc 已于 2026-10-19 扩充支持）；Next 进入解析
+  2. **转换预览**：`POST /api/files/convert`（仅 multipart `file`）→ 后端二次校验 → markitdown-ts **本地**转换 → 弹窗内预览返回的 Markdown 内容；**Import** 才真正建页：复用 `POST /api/courses/:courseId/pages`（§5.1.2）以 `{ title, contentMd: markdown }` 新建 Page（标题=文件名去扩展名，`syncState=SYNCED`）→ 前端刷新树并自动选中进编辑器
 - **失败**：格式不支持/超限/转换失败/结果为空均 400（统一响应格式），弹窗内提示；Cancel 或关闭弹窗则什么都不落（转换阶段不建页、不落盘，内存 Buffer 直转）
 - 音视频文件**不在本轮范围**（2026-10-15 拍板，随 §12 事项 #4 真实外部源接入一并设计）
 
@@ -268,8 +286,11 @@ Knowledge System 是系统的主界面，采用左右两栏布局：
 
 #### 3.3.1 页面布局
 
-- 顶部显示当前选中 Page 的标题（可编辑）
-- 右上角显示 Tags（标签），支持添加/删除
+- 顶部显示当前选中 Page 的标题，**默认展示态 + 铅笔就地编辑（2026-10-19 改）**（对齐 Figma `1.1 Page Editor` 665:543）：
+  - **展示态**：大标题文本（约 30px / 字重 700 / 黑色）+ 右侧常显铅笔按钮（16×16 图标的 20×20 容器）；标题下方一条分隔线
+  - **编辑态**：点击铅笔 → 就地切换为输入框（自动聚焦）；`Enter` / 失焦保存，`Esc` 取消（回滚到进入编辑前的标题）
+  - 原「常驻可编辑填充输入框」形态废弃
+- 标题区右侧保留保存状态提示（页面级 Tags 已移除，见 §3.3.3）
 - 主体区域为 Markdown 编辑器
 
 #### 3.3.2 Markdown 编辑器要求（2026-10-15 改拍：Notion/Jupyter 式块编辑器，BlockNote 实现）
@@ -286,12 +307,12 @@ Knowledge System 是系统的主界面，采用左右两栏布局：
 
 1. **输入=源码、失焦即渲染**：每个块编辑态显示可编辑文本，支持 Markdown 快捷语法（输入 `# ` 回车→H1、`- `→列表、`$$…$$`→数学块、`|a|b|`→表格等，BlockNote 原生 markdown shortcuts）；**失焦 / 切换到另一块 / 手动保存时**自动序列化回 md 并渲染预览态
 2. **无顶栏工具栏**，插入操作两种入口：
-   - **块左侧 ⋮ 柄菜单**（hover 显示）：在上方/下方插入块（段落、H1-H3、表格、图片、数学块、代码块、引用、有序/无序列表）、删除块、复制块、上移下移
+   - **块左侧 ⋮ 柄菜单**（hover 显示）：在上方/下方插入块（段落、H1-H6、表格、图片、数学块、代码块、引用、有序/无序列表）、删除块、复制块、上移下移
    - **右键菜单**（编辑区任意位置 contextmenu）：在光标所在块下方插入指定类型块，每项带图标（段落/标题/列表/表格/代码/引用/数学/图片）——用原生 `contextmenu` 事件 + AntD Dropdown 实现
    - ~~斜杠命令 `/`~~：**已移除**（2026-10-15 冒烟反馈：触发白屏，移除）
 3. **选中内容浮窗**（BlockNote 原生 `formattingToolbar`）：选中文本后自动弹出小工具栏，含：粗体 / 斜体 / 下划线 / 删除线 / 行内代码 / 链接 / 标记（高亮）/ 颜色 / 清除格式
 4. **拖拽重排**：启用块左侧 drag handle（`sideMenu`），长按拖拽改变块顺序
-5. 顶部仅保留：页面标题（可编辑）、Tags、保存状态
+5. 顶部仅保留：页面标题（展示态 + 铅笔就地编辑，见 §3.3.1）、保存状态（页面级 Tags 已移除，tag 仅在 H1-H6 section 下，2026-10-19 扩展）
 
 **数据往返（md ↔ blocks）**：
 
@@ -316,26 +337,36 @@ Knowledge System 是系统的主界面，采用左右两栏布局：
 
 **依赖**：`@blocknote/react@0.56.0`、`@blocknote/mantine@0.56.0`（提供默认 UI 组件，含格式化浮窗、侧边拖拽手柄）、`@blocknote/math-block@0.56.0`、`@blocknote/core@0.56.0`；注意：0.56 为无头架构，`BlockNoteViewRaw` 不提供 UI，必须使用 `@blocknote/mantine` 的 `BlockNoteView`（内部注入 `ComponentsContext`）才能启用 formattingToolbar/sideMenu 等默认浮窗；导出名：`BlockNoteView`（来自 `@blocknote/mantine`，非 `BlockNoteViewRaw`）、数学包名 `@blocknote/math-block`（非 `@blocknote/math`）；`@uiw/react-md-editor` / `remark-math` / `rehype-katex` 保留供 AI ChatWindow 渲染使用
 
-#### 3.3.3 Tags 管理
+#### 3.3.3 Tags 管理（2026-10-16 重构：移除页面级 tags，仅保留 section tags + 全局 Tag 词库方案 B）
 
-- Tags 存储为 JSON 数组格式：`["Core Knowledge", "Teaching Guidance"]`
-- 支持动态添加和删除
-- 显示为标签样式（Ant Design Tag 组件）
+- **页面级 tags 已移除**：编辑器顶部不再显示页面级 TagManager，`Page.tags` 字段删除。
+- **section tags**（`Page.sectionTags`，Json 映射 `{ "h{n}-slug": ["tag1"] }`）：
+  - 每个 H1-H6 标题下方显示一个轻量 TagManager，用户可为该 section 单独打 tag（2026-10-19：由 H1/H2/H3 扩展至 H1-H6）
+  - key = `h{层级}-{slug}`，如 `h1-overview`、`h2-subsection`（层级前缀避免同名冲突）
+  - slug = heading 文本小写、空格转 `-`、去特殊字符
+  - 修改时实时更新 `sectionTags`，随 contentMd 一起保存
+  - 用途：AI 投喂时为对应内容段落标注语义标签（如「核心概念」「易错点」），帮助 AI 精准引用
+- **全局 Tag 词库（方案 B 轻量版）**：
+  - 独立 `Tag` 表（name 唯一、color），初始内置 4 个预设 tag（Core Knowledge=蓝、Teaching Guidance=绿、Misconception=橙、Assessment=紫）
+  - 用户输入 tag 时：输入框带 AutoComplete 联想已有 tag；命中词库则用其颜色
+  - 输入未命中的新 tag → 自动分配颜色（按 name 哈希到预设色板）并**写入 Tag 词库**，供后续选择
+  - 颜色自动分配：对 tag name 做哈希取模到色板（蓝/绿/橙/紫/红/青/金/粉），同名 tag 颜色稳定
+  - 第一版不做独立 Tag 管理界面，靠「输入即沉淀」自动维护词库；删 tag/改色留后续
 
-### 3.4 右侧内容区 - Tab 2: Publish（版本发布）
+### 3.4 右侧内容区 - Tab 2: Releases（版本发布）
 
 #### 3.4.1 发布列表
 
-表格展示所有 Course 的发布状态，列包括：
+列表上方标题行显示 `Knowledge Releases`（2026-10-19 新增）。表格展示所有 Course 的发布状态，列包括：
 
 | 列名 | 说明 |
 |------|------|
 | Course Name | 课程名称 |
 | Revision Notes | **激活版本**的备注（2026-10-15 随激活模型改拍，原「最近一次发布的备注」；若无则显示 "No revision notes provided"） |
-| Current Version | **激活版本**版本号（`Course.currentReleaseId` 指向的 Release），格式 `CourseName_YYYYMMDDHHmm`，可点击 |
-| Action | Publish 按钮 |
+| Latest Release | **激活版本**版本号（`Course.currentReleaseId` 指向的 Release），格式 `CourseName_YYYYMMDDHHmm`，可点击（2026-10-19 由 "Current Version" 更名） |
+| Action | Create Release 按钮（2026-10-19 由 "Publish" 更名） |
 
-#### 3.4.2 Current Version 交互
+#### 3.4.2 Latest Release 交互
 
 > **设计改拍（2026-10-15，用户裁决）**：原「只读查看、无回滚」改为**激活版本模型**——历史版本可浏览、可切换为激活版本。
 
@@ -344,25 +375,26 @@ Knowledge System 是系统的主界面，采用左右两栏布局：
 - 每个非激活的历史版本提供「切换到此版本」按钮（§12 事项 #5 拍板）：
   1. 二次确认弹窗：明确提示「切换将以该版本内容**覆盖当前可编辑草稿**（含未发布的修改），且 AI Tutor 知识库立即变为该版本」，用户确认后才执行
   2. 前端调用 `POST /api/courses/:id/activate-release`，传入 `{ releaseId }`
-  3. 后端在**单事务**内：校验 releaseId 属于该 Course → 更新 `Course.currentReleaseId` → 用该 Release 的 snapshotData **重建 Lesson/Page 草稿树**（快照中仅含发布时刻的 SYNCED 节点，重建节点一律 `syncState=SYNCED`，后续 Sync 按标题匹配不受影响）
+  3. 后端在**单事务**内：校验 releaseId 属于该 Course → 更新 `Course.currentReleaseId` → 用该 Release 的 snapshotData **重建 Page 草稿**（快照中仅含发布时刻的 SYNCED 节点，重建节点一律 `syncState=SYNCED`，后续 Sync 按标题匹配不受影响）
   4. 前端刷新课程树与编辑器（当前草稿指向的页面可能已不存在，需清空选中态）
 
-#### 3.4.3 Publish 流程
+#### 3.4.3 Create Release 流程
 
-> **设计改拍（2026-10-15）**：Publish 语义 = 创建快照 + **激活**（发布即激活）；快照仅收录 `syncState=SYNCED` 的节点（延续 §3.2.2「STALE 不作 AI 知识库」）。
+> **设计改拍（2026-10-15）**：Create Release 语义 = 创建快照 + **激活**（发布即激活）；快照仅收录 `syncState=SYNCED` 的节点（延续 §3.2.2「STALE 不作 AI 知识库」）。
 
-1. 用户点击某个 Course 的 "Publish" 按钮
+1. 用户点击某个 Course 的 "Create Release" 按钮
 2. 弹出 Modal，要求填写 Revision Notes（必填）
 3. 确认后，前端调用 `POST /api/courses/:id/release` 接口，传入 revisionNotes
 4. 后端在**单事务**内执行以下逻辑：
-   - 读取当前 Course 下所有 Lessons 及其对应的 Pages（**过滤 STALE 节点**）
+   - 读取当前 Course 下所有 Pages（**过滤 STALE 节点**）
    - 生成版本号：`CourseTitle_YYYYMMDDHHmm`
-   - 将所有当前内容聚合为 JSON 快照
+   - 将所有当前内容聚合为 JSON 快照：`{ pages: [{ id, title, contentMd, sectionTags }] }`
    - 写入 Release 表
-   - 更新 `Course.currentReleaseId` = 新 Release（发布即激活；此刻草稿与快照内容一致，无需重建树）
-5. 前端刷新 Publish 列表
+   - 更新 `Course.currentReleaseId` = 新 Release（发布即激活）
+5. 前端刷新 Releases 列表
 
-> **重要**：Publish 动作是发布整个 Course 下所有页面的快照，不是单个 Page。
+> **重要**：Create Release 动作是发布整个 Course 下所有页面的快照，不是单个 Page。
+> **2026-10-16 扁平化**：快照结构从 `{ lessons: [...] }` 改为 `{ pages: [...] }`，activate 时直接重建 Page（不再经过 Lesson）。
 
 ---
 
@@ -435,7 +467,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
    - message（用户输入）
    - mode（当前模式：lecture 或 socratic）
 3. 后端执行以下逻辑：
-   - 知识库上下文来源（**2026-10-15 拍板改**）：读取 `Course.currentReleaseId` 指向的激活 Release 的 snapshotData 聚合课程资料，**不再读实时草稿**——Publish 后未再次发布的编辑不影响 AI；若课程从未发布（currentReleaseId 为空），返回错误提示「该课程尚未发布知识库版本，请先在 Knowledge 模块 Publish」
+   - 知识库上下文来源（**2026-10-15 拍板改**）：读取 `Course.currentReleaseId` 指向的激活 Release 的 snapshotData 聚合课程资料，**不再读实时草稿**——创建 Release 后未再次发布的编辑不影响 AI；若课程从未发布（currentReleaseId 为空），返回错误提示「该课程尚未发布知识库版本，请先在 Knowledge 模块 Releases 页创建版本」（2026-10-19 文案随 Tab 更名更新）
    - 组装 Prompt：`System Prompt + [CONTEXT: 课程资料] + 用户消息`
    - 调用 LLM API（流式）
    - 将流式响应转发给前端
@@ -477,7 +509,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 1. **参数校验**：验证 courseId、message、mode 必填
 2. **加载配置**：根据 courseId 获取 CourseAiConfig，解析 LLM 提供商和模型（apiKey 字段经 AES-256-GCM 解密后仅在内存中使用，环境变量 `AI_CONFIG_ENCRYPTION_KEY`，2026-10-14 拍板）
-3. **加载知识库上下文**：根据 courseId 查询所有 Lesson -> Page，聚合 Markdown 内容
+3. **加载知识库上下文**：读取 `Course.currentReleaseId` 指向的激活 Release 的 `snapshotData.pages`，按 H1-H6 section 切分 contentMd，每段拼接对应 `sectionTags`（如有），聚合为带语义标注的课程资料
 4. **组装 Prompt**：
    - 获取对应模式的 PromptTemplate（优先自定义，其次默认）
    - 拼接：`System Prompt` + `[CONTEXT_START]` + 课程资料 + `[CONTEXT_END]` + 用户消息
@@ -503,32 +535,28 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | /api/courses | 获取所有 Course 列表 |
-| GET | /api/courses/:id | 获取单个 Course（含下属 Lessons 和 Pages） |
+| GET | /api/courses/:id | 获取单个 Course（含下属 Pages） |
 | POST | /api/courses | 创建 Course |
 | PUT | /api/courses/:id | 更新 Course |
-| DELETE | /api/courses/:id | 删除 Course（级联删除 Lesson 和 Page） |
+| DELETE | /api/courses/:id | 删除 Course（级联删除 Page） |
 
-> **删除保护（2026-10-14 拍板）**：Course 下已存在 Release 历史版本时拒绝删除，返回 409 `CONFLICT`（message 提示先处理历史版本），以保证发布快照完整可回放；级联删除仅作用于 Lesson/Page。
+> **删除保护（2026-10-14 拍板）**：Course 下已存在 Release 历史版本时拒绝删除，返回 409 `CONFLICT`。
 
-#### 5.1.2 章节 CRUD
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | /api/courses/:courseId/lessons | 在指定 Course 下创建 Lesson |
-| PUT | /api/lessons/:id | 更新 Lesson |
-| DELETE | /api/lessons/:id | 删除 Lesson（级联删除 Page） |
-| PUT | /api/lessons/:id/reorder | 调整 Lesson 排序 |
-
-#### 5.1.3 页面 CRUD
+#### 5.1.2 页面 CRUD（2026-10-16 扁平化：原 Lesson 端点删除，Page 直接挂 Course）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /api/lessons/:lessonId/pages | 在指定 Lesson 下创建 Page |
-| GET | /api/pages/:id | 获取单个 Page（含 contentMd） |
-| PUT | /api/pages/:id | 更新 Page（标题、contentMd、tags、排序） |
+| POST | /api/courses/:courseId/pages | 在指定 Course 下创建 Page |
+| GET | /api/pages/:id | 获取单个 Page（含 contentMd、sectionTags） |
+| PUT | /api/pages/:id | 更新 Page（标题、contentMd、sectionTags、排序） |
+| PUT | /api/courses/:courseId/pages/reorder | 批量重排 Course 下 Page 顺序：body `{ orderedIds: string[] }`（须为该 Course **全部** Page id 的一个排列）；事务内按数组下标重写 `sortOrder`（2026-10-19 新增，左侧树拖拽排序用） |
 | DELETE | /api/pages/:id | 删除 Page |
 
-#### 5.1.4 发布与版本
+> **批量排序接口校验**：`orderedIds` 必须无重复、且集合等于该 Course 现有全部 Page id，否则 400 `VALIDATION_ERROR`；`courseId` 不存在返回 404。
+>
+> 原 `POST /api/courses/:courseId/lessons`、`PUT/DELETE /api/lessons/:id`、`PUT /api/lessons/:id/reorder`、`POST /api/courses/:lessonId/pages` 已删除（2026-10-16；`reorder` 语义于 2026-10-19 以 Course 级批量排序接口重建）。
+
+#### 5.1.3 发布与版本
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -537,7 +565,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 | GET | /api/releases/:releaseId | 获取某个 Release 的快照详情 |
 | POST | /api/courses/:id/activate-release | 切换激活版本：`{ releaseId }`；事务内更新 currentReleaseId 并以该快照重建草稿树（2026-10-15 新增，§3.4.2） |
 
-#### 5.1.5 同步接口
+#### 5.1.4 同步接口
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
@@ -547,13 +575,20 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 > 同步语义详见 §3.2.2（外部源接管模型）。Mock 阶段外部源为后端内存 fixture；真实外部 API 接入（§12 事项 #4）后替换数据源。
 
-#### 5.1.6 文件上传（2026-10-15 新增；同日按 §3.2.3 弹窗设计改为仅转换不建页）
+#### 5.1.5 文件上传（2026-10-15 新增；同日按 §3.2.3 弹窗设计改为仅转换不建页）
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /api/files/convert | multipart：`file`（白名单+≤15MB，§10.1）；markitdown-ts 本地转 Markdown，返回 `{ title, markdown }`（title=文件名去扩展名，含中文文件名乱码修复）；**不建页**——用户在弹窗预览确认后经 §5.1.3 `POST /api/lessons/:lessonId/pages` 建页；校验/转换失败 400 |
+| POST | /api/files/convert | multipart：`file`（白名单+≤15MB，§10.1）；本地转 Markdown（markitdown-ts 为主；`.xls`→SheetJS `xlsx`、`.doc`→`word-extractor`，2026-10-19 扩充），返回 `{ title, markdown }`；**不建页**——用户在弹窗预览确认后经 §5.1.2 `POST /api/courses/:courseId/pages` 建页；校验/转换失败 400 |
 
 > 原 `POST /api/files/upload`（转换+建页一步完成）已废弃（2026-10-15），被两步流程取代。
+
+#### 5.1.6 全局 Tag 词库（2026-10-16 方案 B 轻量版）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | /api/tags | 列出所有 tag（name、color），供 TagManager AutoComplete 联想 |
+| POST | /api/tags | 创建 tag：`{ name }`；name 已存在则返回已有记录；新 tag 颜色由后端自动分配（按 name 哈希到预设色板） |
 
 ### 5.2 AI 相关接口
 
@@ -787,7 +822,7 @@ NODE_ENV=development
 
 # 文件上传配置
 MAX_FILE_SIZE=15728640  # 15MB
-ALLOWED_EXTENSIONS="txt,md,csv,pdf,docx,xlsx,html,xml"  # 与 §10.1 拍板白名单一致（2026-10-15 更正；实际实现为 files.service.ts 常量，不读该 env）
+ALLOWED_EXTENSIONS="txt,md,csv,pdf,docx,xlsx,html,xml,doc,xls"  # 与 §10.1 拍板白名单一致（2026-10-15 更正、2026-10-19 扩充 doc/xls；实际实现为 files.service.ts 常量，不读该 env）
 ```
 
 ---
@@ -830,19 +865,21 @@ ALLOWED_EXTENSIONS="txt,md,csv,pdf,docx,xlsx,html,xml"  # 与 §10.1 拍板白�
 |--------|------|
 | 文件数量 | 单次最多 1 个文件 |
 | 文件大小 | 最大 15MB |
-| 允许格式 | txt, md, csv, pdf, docx, xlsx, html, xml |
+| 允许格式 | txt, md, csv, pdf, docx, xlsx, html, xml, doc, xls |
 
 > **白名单改拍（2026-10-15，用户裁决）**：原表（含 xls/doc/ppt/epub）按 markitdown-ts 实测支持面调整——旧二进制格式 xls/doc/ppt 与 epub 不支持（上传时明确提示「格式暂不支持」）。
+>
+> **白名单扩充（2026-10-19，用户裁决）**：重新支持旧版二进制 **.doc / .xls**——`.xls` 用 SheetJS（`xlsx`）解析转 Markdown 表格，`.doc` 用 `word-extractor` 提取纯文本；其余格式仍由 markitdown-ts 转换（ppt/epub 仍不支持）。**限制说明：`.doc` 仅提取纯文本，不含标题层级 / 表格 / 图片**。
 
 ### 10.2 处理流程
 
 1. 弹窗步骤①：前端校验文件类型和大小（扩展名白名单 + ≤15MB）
-2. 弹窗步骤②上传到后端 `POST /api/files/convert`（multipart `file`，§3.2.3/§5.1.6）
+2. 弹窗步骤②上传到后端 `POST /api/files/convert`（multipart `file`，§3.2.3/§5.1.5）
 3. 后端二次校验文件类型白名单与大小（multer limits）
 4. 内存 Buffer 直转，**不落临时目录**（2026-10-15 实现拍板）
-5. 调用转换服务：**markitdown-ts**（本地，§12 事项 #3 拍板）
+5. 调用转换服务：**markitdown-ts** 为主（本地，§12 事项 #3 拍板）；`.xls`→**SheetJS `xlsx`** 转 Markdown 表格，`.doc`→**`word-extractor`** 提取纯文本（2026-10-19 扩充）
 6. 生成 Markdown 内容，返回 `{ title, markdown }` 供弹窗预览
-7. 用户点击 **Import** → 经 §5.1.3 页面创建接口在指定 Lesson 下新建 Page（标题=文件名去扩展名），前端刷新树自动选中；Cancel 则不落任何数据
+7. 用户点击 **Import** → 经 §5.1.2 页面创建接口在指定 Course 下新建 Page（标题=文件名去扩展名；2026-10-16 扁平化后无 Lesson 层，Page 直接挂 Course），前端刷新树自动选中；Cancel 则不落任何数据
 
 ### 10.3 转换服务选型建议
 
@@ -852,6 +889,8 @@ ALLOWED_EXTENSIONS="txt,md,csv,pdf,docx,xlsx,html,xml"  # 与 §10.1 拍板白�
 | markitdown-ts | TypeScript 原生，轻量 | Node/TS 工程化优先 |
 
 > **选型拍板（2026-10-15）**：markitdown-ts。实测（真实 docx/pdf/md 样本）：docx/xlsx/pdf/html/xml/txt/md/csv 转换正常；xls/doc/ppt/epub 不支持；图片类需 LLM 视觉模型（不启用）。原「xml、xls、epub 需单独确认」事项已了结。
+>
+> **补充选型（2026-10-19，用户裁决）**：为覆盖 markitdown-ts 不支持的旧版二进制格式，新增专用库——`.xls` 用 **SheetJS**（`xlsx`，读 BIFF 转 Markdown 表格）、`.doc` 用 **`word-extractor`**（提取纯文本）；均为**纯本地 Node**，不引入外部程序 / 服务。
 
 ---
 
@@ -861,7 +900,7 @@ ALLOWED_EXTENSIONS="txt,md,csv,pdf,docx,xlsx,html,xml"  # 与 §10.1 拍板白�
 
 1. **用户认证**：是否需要用户登录、多用户、权限管理？还是先做单人私有部署？（Phase 3 已拍板：单人私有部署，鉴权仅预留骨架，见 §7 Phase 3 注记；完整方案 Phase 7 定）
 2. **AI Provider**：初期接入哪些 LLM 提供商？（2026-10-14 拍板：**OpenRouter**（OpenAI 兼容接口，经策略模式适配器接入）；具体启用模型清单由用户后续确认，数据源为 `AI_AVAILABLE_MODELS` env；其他 Provider 仅预留适配器接口）
-3. **文件转换**：是否允许调用外部服务？还是必须尽量本地 Node 完成？（2026-10-15 拍板：**本地 markitdown-ts**，不调外部服务；支持面实测见 §10.1）
+3. **文件转换**：是否允许调用外部服务？还是必须尽量本地 Node 完成？（2026-10-15 拍板：**本地 markitdown-ts**，不调外部服务；支持面实测见 §10.1；2026-10-19 扩充：新增纯本地库 SheetJS `xlsx` / `word-extractor` 以支持 .xls/.doc，仍不调外部服务）
 4. **外部同步源**：Sync 功能对接的外部 API 文档是否已就绪？接口格式如何？
 5. **历史版本回滚**：是否需要从 Release 快照回滚到某个历史版本？（2026-10-15 拍板：**需要**，采用「激活版本」模型——历史版本可切换为激活版本，AI 知识库与可编辑草稿同步变为该版本，覆盖草稿前二次确认；详见 §3.4.2/§3.4.3/§4.3.3）
 6. **AI 对话持久化**：对话记录是否需要长期保存？是否有数据保留策略？（2026-10-14 拍板：**不落库**；上次会话经浏览器 localStorage 持久化，New Chat 清空；无长期记忆需求，见 §4.3.2）

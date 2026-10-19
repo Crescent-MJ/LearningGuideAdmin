@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
-import { App, Button, Input, Modal, Table, Tag, Typography } from '../ui'
+import { App, Button, Input, Modal, Panel, Table, Tag, Typography } from '../ui'
 import type { ColumnsType } from '../ui'
 import { knowledgeApi, type ReleaseSummary } from '../../api/knowledge'
 import { useKnowledgeStore } from '../../stores/knowledgeStore'
 import { tokens } from '../../theme/tokens'
 
 /**
- * Publish 版本发布面板（§3.4；2026-10-15 激活版本模型）：
- * - 表格列：Course Name / Revision Notes / Current Version（激活版本，可点击）/ Action
+ * Releases 版本发布面板（§3.4；2026-10-15 激活版本模型；2026-10-19 由 Publish 更名为 Releases）：
+ * - 列表上方标题行：Knowledge Releases
+ * - 表格列：Course Name / Revision Notes / Latest Release（激活版本，可点击）/ Action
  * - 点击版本号 → Modal 展示历史版本：激活中标识 + 非激活版本「切换到此版本」（二次确认，覆盖草稿）
- * - Publish → Modal 必填 Revision Notes → POST /api/courses/:id/release（发布即激活）→ 刷新
+ * - Create Release → Modal 必填 Revision Notes → POST /api/courses/:id/release（发布即激活）→ 刷新
  */
 export function PublishPanel() {
   const { message, modal } = App.useApp()
@@ -87,7 +88,7 @@ export function PublishPanel() {
       },
     },
     {
-      title: 'Current Version',
+      title: 'Latest Release',
       key: 'version',
       render: (_, record) => {
         const current = latest[record.id]?.find((r) => r.isActive)
@@ -104,7 +105,7 @@ export function PublishPanel() {
       key: 'action',
       render: (_, record) => (
         <Button type="primary" size="small" onClick={() => setPublishCourse(record.id)}>
-          Publish
+          Create Release
         </Button>
       ),
     },
@@ -113,7 +114,12 @@ export function PublishPanel() {
   const historyList = historyCourse ? latest[historyCourse] ?? [] : []
 
   return (
-    <div style={{ height: '100%', overflow: 'auto' }}>
+    // 内容面板（2026-10-19 对齐 Figma）：白色/圆角12/无边框/卡片阴影，与 Knowledge Pages、AI Tutor 统一
+    <Panel style={{ overflow: 'auto' }}>
+      {/* 列表上方标题行（2026-10-19 新增） */}
+      <Typography.Title level={4} style={{ marginTop: 0, marginBottom: tokens.spacing.md }}>
+        Knowledge Releases
+      </Typography.Title>
       <Table
         rowKey="id"
         columns={columns}
@@ -172,7 +178,7 @@ export function PublishPanel() {
         }}
       >
         <Typography.Paragraph type="secondary">
-          Publish 将发布整个课程下所有页面的快照（非单个页面）。
+          Create Release 将发布整个课程下所有页面的快照（非单个页面）。
         </Typography.Paragraph>
         <Input.TextArea
           rows={3}
@@ -182,6 +188,6 @@ export function PublishPanel() {
           maxLength={500}
         />
       </Modal>
-    </div>
+    </Panel>
   )
 }

@@ -5,12 +5,12 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { PrismaModule } from './prisma/prisma.module';
 import { CoursesModule } from './courses/courses.module';
-import { LessonsModule } from './lessons/lessons.module';
 import { PagesModule } from './pages/pages.module';
 import { ReleasesModule } from './releases/releases.module';
 import { SyncModule } from './sync/sync.module';
 import { FilesModule } from './files/files.module';
 import { AiModule } from './ai/ai.module';
+import { TagsModule } from './tags/tags.module';
 import { validateEnv } from './config/env.validation';
 import { TransformInterceptor } from './common/interceptors/transform.interceptor';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
@@ -29,7 +29,6 @@ import { ApiKeyGuard } from './common/guards/api-key.guard';
     PrismaModule,
     // Knowledge System 后端模块（§7 Phase 3、§5.1）
     CoursesModule,
-    LessonsModule,
     PagesModule,
     ReleasesModule,
     SyncModule,
@@ -37,6 +36,8 @@ import { ApiKeyGuard } from './common/guards/api-key.guard';
     FilesModule,
     // AI Tutor 后端模块（§7 Phase 5、§5.2）
     AiModule,
+    // 全局 Tag 词库（§3.3.3 方案 B、§5.1.6）
+    TagsModule,
   ],
   controllers: [AppController],
   providers: [

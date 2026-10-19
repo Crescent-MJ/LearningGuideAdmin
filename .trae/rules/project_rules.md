@@ -31,6 +31,10 @@ Learning Guide BackOffice —— 结构化课程知识库管理系统（Knowledg
 5. 所有 API 响应使用统一格式（success/data/error/message）
 6. 每次开发结束：【AI协作日志】写入 `docs/AI_Collaboration_Log.md`（每完成一个 Phase 或重大决策必须落盘该文档）+ 回填受影响文档（含设计文档同步）
 
+## 工具使用约束（强制，2026-10-16 用户拍板）
+
+- **禁止浏览器操作**：Dev Agent 及其子代理一律不得调用浏览器相关工具（browser_use 子代理、browser_navigate、browser_click、browser_snapshot 等），也不得启动浏览器进行 UI 冒烟/验证。前端验收由用户手动完成。
+
 ## Git 工作流
 
 - **分支模型**：

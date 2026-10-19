@@ -11,12 +11,14 @@
  */
 
 export const color = {
-  /** 主色（Ant Design 默认蓝） */
-  primary: '#1677ff',
+  /** 主色（Figma 设计库 fill_81baaa3e: #1D6BFF） */
+  primary: '#1D6BFF',
+  /** 主色加深（Figma fill_f4699796: #145CFF，用于 hover/active） */
+  primaryDark: '#145CFF',
   /** 主色浅底（选中/高亮背景） */
-  primaryBg: '#e6f4ff',
-  /** 主色浅边框（上传预览虚线等） */
-  primaryBorder: '#91caff',
+  primaryBg: '#E8F0FF',
+  /** 主色浅边框 */
+  primaryBorder: '#B8CCFF',
   /** 成功色 */
   success: '#52c41a',
   /** 警告色 */
@@ -24,26 +26,30 @@ export const color = {
   /** 错误色 */
   error: '#ff4d4f',
   text: {
-    /** 主文字色 */
-    primary: '#333',
+    /** 主文字色（Figma 深石板 #1E293B） */
+    primary: '#1E293B',
     /** 次要文字色 */
-    secondary: '#8c8c8c',
+    secondary: '#64748b',
     /** 辅助文字色 */
-    tertiary: '#999',
+    tertiary: '#94a3b8',
     /** 禁用/失效文字色（STALE 节点等） */
-    disabled: '#bfbfbf',
+    disabled: '#cbd5e1',
     /** 图标中性色 */
-    icon: '#666',
+    icon: '#475569',
   },
-  /** 边框色 */
-  border: '#f0f0f0',
+  /** 边框色（Figma fill_7a59ae7b: #E8EDF5） */
+  border: '#E8EDF5',
+  /** 输入类边框色（Figma fill: #E2E8F0；输入框/文本域/下拉默认描边） */
+  inputBorder: '#E2E8F0',
+  /** 输入类底色（Figma fill: #FAFBFC；输入框/文本域/下拉默认填充） */
+  inputBg: '#FAFBFC',
   bg: {
     /** 容器底色 */
     container: '#fff',
-    /** 布局/页面底色 */
-    layout: '#f5f5f5',
-    /** 弱化背景（预览区等） */
-    subtle: '#fafafa',
+    /** 布局/页面底色（Figma fill_85065e9e: #F8FAFC） */
+    layout: '#F8FAFC',
+    /** 弱化背景（Figma fill_9b9cf5c5: #E8EBED） */
+    subtle: '#E8EBED',
   },
 } as const
 
@@ -69,12 +75,20 @@ export const fontSize = {
   lg: 13,
   xl: 14,
   '2xl': 16,
+  '3xl': 20,
 } as const
 
 export const fontWeight = {
   normal: 400,
   medium: 500,
   semibold: 600,
+  bold: 700,
+} as const
+
+/** Figma 设计库阴影（effect_c5bd7c6c） */
+export const shadow = {
+  card: '0px 1px 2px -1px rgba(0, 0, 0, 0.1), 0px 1px 3px 0px rgba(0, 0, 0, 0.1)',
+  floating: '0px 4px 16px 0px rgba(0, 0, 0, 0.08), 0px 1px 4px 0px rgba(0, 0, 0, 0.04)',
 } as const
 
 export const tokens = {
@@ -83,6 +97,7 @@ export const tokens = {
   radius,
   fontSize,
   fontWeight,
+  shadow,
 } as const
 
 export type TokenColor = keyof typeof color

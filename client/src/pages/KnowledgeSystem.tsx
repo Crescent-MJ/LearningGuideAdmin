@@ -1,48 +1,24 @@
-import { useEffect, useState } from 'react'
-import { Tabs } from '../components/ui'
+import { useEffect } from 'react'
 import { PageEditor } from '../components/knowledge/PageEditor'
 import { PublishPanel } from '../components/knowledge/PublishPanel'
+import type { KnowledgeTabKey } from '../components/knowledge/KnowledgeTabBar'
 import { useKnowledgeStore } from '../stores/knowledgeStore'
-import { tokens } from '../theme/tokens'
 
 /**
- * 知识库主页右侧内容区（§3.1）：
- * Tab 1 Knowledge Pages（编辑器）/ Tab 2 Publish（版本发布）。
+ * 知识库主页内容区（§3.1；2026-10-19 改）。
+ * 顶部整宽 Tab 栏（KnowledgeTabBar）由 App 经 MainLayout 的 topBar 插槽渲染，
+ * 本组件只按选中的 Tab 键渲染对应内容：`pages` → 编辑器，`publish` → 版本发布面板。
  */
-export function KnowledgeSystem() {
+export function KnowledgeSystem({ tab }: { tab: KnowledgeTabKey }) {
   const loadCourses = useKnowledgeStore((s) => s.loadCourses)
-  const [tab, setTab] = useState('pages')
 
   useEffect(() => {
     void loadCourses()
   }, [loadCourses])
 
   return (
-    <Tabs
-      activeKey={tab}
-      onChange={setTab}
-      style={{ height: '100%' }}
-      tabBarStyle={{ marginBottom: tokens.spacing.sm }}
-      items={[
-        {
-          key: 'pages',
-          label: 'Knowledge Pages',
-          children: (
-            <div style={{ height: 'calc(100vh - 180px)' }}>
-              <PageEditor />
-            </div>
-          ),
-        },
-        {
-          key: 'publish',
-          label: 'Publish',
-          children: (
-            <div style={{ height: 'calc(100vh - 180px)' }}>
-              <PublishPanel />
-            </div>
-          ),
-        },
-      ]}
-    />
+    <div style={{ height: '100%', minHeight: 0 }}>
+      {tab === 'publish' ? <PublishPanel /> : <PageEditor />}
+    </div>
   )
 }

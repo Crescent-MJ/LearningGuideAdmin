@@ -1,16 +1,20 @@
-import { ReadOutlined, RobotOutlined } from '@ant-design/icons'
 import { tokens } from '../../theme/tokens'
+import { KnowledgeLayersIcon, AiTutorIcon } from '../icons'
 
 export type ModuleKey = 'knowledge' | 'ai-tutor'
 
 const ITEMS: { key: ModuleKey; label: string; icon: React.ReactNode }[] = [
-  { key: 'knowledge', label: 'Knowledge', icon: <ReadOutlined /> },
-  { key: 'ai-tutor', label: 'AI Tutor', icon: <RobotOutlined /> },
+  {
+    key: 'knowledge',
+    label: 'Knowledge',
+    icon: <KnowledgeLayersIcon size={18} />,
+  },
+  { key: 'ai-tutor', label: 'AI Tutor', icon: <AiTutorIcon size={18} /> },
 ]
 
 /**
- * 左侧模块导航列（§3.1 排版对齐设计稿 2026-10-14）：
- * Knowledge / AI Tutor 两个模块入口，当前模块高亮。
+ * 左侧模块导航列（对齐 Figma 设计库 2026-10-16）：
+ * Knowledge / AI Tutor 两个模块入口，当前模块高亮（主色 #1D6BFF，浅底 #E8F0FF）。
  */
 export function ModuleNav({
   active,
@@ -50,7 +54,8 @@ export function ModuleNav({
               textAlign: 'left',
               background: isActive ? tokens.color.primaryBg : 'transparent',
               color: isActive ? tokens.color.primary : tokens.color.text.primary,
-              fontWeight: isActive ? tokens.fontWeight.semibold : tokens.fontWeight.normal,
+              fontWeight: isActive ? tokens.fontWeight.semibold : tokens.fontWeight.medium,
+              transition: 'all 0.15s ease',
             }}
           >
             {item.icon}

@@ -8,18 +8,10 @@ export interface PageNode {
   id: string
   title: string
   contentMd: string
-  tags: string[] | null
+  /** H1-H6 级标签映射：{ "h{n}-slug": ["tag1"] }（2026-10-16：移除页面级 tags） */
+  sectionTags: Record<string, string[]> | null
   sortOrder: number
   syncState: SyncState
-}
-
-export interface LessonNode {
-  id: string
-  title: string
-  duration: number | null
-  sortOrder: number
-  syncState: SyncState
-  pages: PageNode[]
 }
 
 export interface Course {
@@ -31,8 +23,9 @@ export interface Course {
   updatedAt: string
 }
 
+/** 2026-10-16 扁平化：原 Course.lessons → Course.pages（两级结构） */
 export interface CourseDetail extends Course {
-  lessons: LessonNode[]
+  pages: PageNode[]
 }
 
 export interface ReleaseSummary {
@@ -40,29 +33,30 @@ export interface ReleaseSummary {
   versionTag: string
   revisionNotes: string
   createdAt: string
-  /** 是否为该 Course 的激活版本（AI 知识库 + 草稿同步依据，§3.4.2） */
   isActive: boolean
 }
 
 export interface ReleaseDetail extends Omit<ReleaseSummary, 'isActive'> {
   courseId: string
-  /** 后端 GET /releases/:id 与 publish 返回裸 Release 行，不带 isActive（§5.1.4） */
   isActive?: boolean
   snapshotData: {
-    lessons: Array<{
+    pages: Array<{
       id: string
       title: string
-      pages: Array<{
-        id: string
-        title: string
-        contentMd: string
-        tags: string[] | null
-      }>
+      contentMd: string
+      sectionTags: Record<string, string[]> | null
     }>
   }
 }
 
-// 外部源同步（§3.2.2 / §5.1.5）
+/** 全局 Tag 词库项（§5.1.6 / §3.3.3 方案 B） */
+export interface TagItem {
+  id: string
+  name: string
+  color: string
+}
+
+// 外部源同步（§3.2.2 / §5.1.4）
 export interface ExternalCourseStatus {
   externalId: string
   title: string
@@ -76,7 +70,7 @@ export interface SyncSummary {
   unchanged: boolean
 }
 
-// ============ 接口封装（§5.1 知识库相关 18 端点） ============
+// ============ 接口封装（§5.1 知识库相关） ============
 
 export const knowledgeApi = {
   // 课程 CRUD（§5.1.1）
@@ -89,31 +83,35 @@ export const knowledgeApi = {
   deleteCourse: (id: string) =>
     http.delete(`/courses/${id}`).then((r) => r.data),
 
-  // 章节 CRUD（§5.1.2）
-  createLesson: (courseId: string, data: { title: string; duration?: number }) =>
-    http.post<LessonNode>(`/courses/${courseId}/lessons`, data).then((r) => r.data),
-  updateLesson: (id: string, data: { title?: string; duration?: number }) =>
-    http.put<LessonNode>(`/lessons/${id}`, data).then((r) => r.data),
-  deleteLesson: (id: string) =>
-    http.delete(`/lessons/${id}`).then((r) => r.data),
-  reorderLesson: (id: string, sortOrder: number) =>
-    http.put<LessonNode>(`/lessons/${id}/reorder`, { sortOrder }).then((r) => r.data),
-
-  // 页面 CRUD（§5.1.3）
+  // 页面 CRUD（§5.1.2，2026-10-16 扁平化：Page 直接挂 Course）
   createPage: (
-    lessonId: string,
-    data: { title: string; contentMd: string; tags?: string[] },
-  ) => http.post<PageNode>(`/lessons/${lessonId}/pages`, data).then((r) => r.data),
+    courseId: string,
+    data: { title: string; contentMd: string; sectionTags?: Record<string, string[]> },
+  ) => http.post<PageNode>(`/courses/${courseId}/pages`, data).then((r) => r.data),
   getPage: (id: string) =>
     http.get<PageNode>(`/pages/${id}`).then((r) => r.data),
   updatePage: (
     id: string,
-    data: { title?: string; contentMd?: string; tags?: string[]; sortOrder?: number },
+    data: { title?: string; contentMd?: string; sectionTags?: Record<string, string[]>; sortOrder?: number },
   ) => http.put<PageNode>(`/pages/${id}`, data).then((r) => r.data),
+  /** 批量重排 Course 下 Page 顺序（§5.1.2，2026-10-19 新增，左侧树拖拽排序用） */
+  reorderPages: (courseId: string, orderedIds: string[]) =>
+    http
+      .put<{ orderedIds: string[] }>(`/courses/${courseId}/pages/reorder`, { orderedIds })
+      .then((r) => r.data),
   deletePage: (id: string) =>
     http.delete(`/pages/${id}`).then((r) => r.data),
 
-  // 发布与版本（§5.1.4）
+  // 全局 Tag 词库（§5.1.6 / §3.3.3 方案 B）
+  listTags: () => http.get<TagItem[]>('/tags').then((r) => r.data),
+  createTag: (name: string, color?: string) =>
+    http.post<TagItem>('/tags', { name, color }).then((r) => r.data),
+  updateTagColor: (name: string, color: string) =>
+    http.put<TagItem>(`/tags/${encodeURIComponent(name)}`, { color }).then((r) => r.data),
+  deleteTag: (name: string) =>
+    http.delete(`/tags/${encodeURIComponent(name)}`).then((r) => r.data),
+
+  // 发布与版本（§5.1.3）
   publish: (courseId: string, revisionNotes: string) =>
     http.post<ReleaseDetail>(`/courses/${courseId}/release`, { revisionNotes }).then((r) => r.data),
   listReleases: (courseId: string) =>
@@ -128,7 +126,7 @@ export const knowledgeApi = {
       )
       .then((r) => r.data),
 
-  // 同步（§5.1.5 / §3.2.2 外部源接管模型）
+  // 同步（§5.1.4 / §3.2.2 外部源接管模型）
   listExternalCourses: () =>
     http.get<ExternalCourseStatus[]>('/sync/external-courses').then((r) => r.data),
   syncStructure: (externalId: string) =>
@@ -136,18 +134,18 @@ export const knowledgeApi = {
   syncAll: (externalId: string) =>
     http.post<SyncSummary>('/sync/all', { externalId }).then((r) => r.data),
 
-  // 文档转换（§5.1.6 / §3.2.3 / §10）：仅本地转换返回预览，不建页；
-  // Import 经上方 createPage（§5.1.3）建页
+  // 文档转换（§5.1.5 / §3.2.3 / §10）：仅本地转换返回预览，不建页；
+  // Import 经上方 createPage（§5.1.2）建页
   convertFile: (file: File) => {
     const form = new FormData()
     form.append('file', file)
     return http
-      .post<ConvertedDocument>('/files/convert', form, { timeout: 60000 }) // 大文件+本地转换放宽超时
+      .post<ConvertedDocument>('/files/convert', form, { timeout: 60000 })
       .then((r) => r.data)
   },
 }
 
-/** §5.1.6 转换结果（title=文件名去扩展名） */
+/** §5.1.5 转换结果（title=文件名去扩展名） */
 export interface ConvertedDocument {
   title: string
   markdown: string
@@ -163,6 +161,8 @@ export const UPLOAD_ALLOWED_EXTENSIONS = [
   '.xlsx',
   '.html',
   '.xml',
+  '.doc',
+  '.xls',
 ] as const
 
 /** §10.1 单文件大小上限 15MB */

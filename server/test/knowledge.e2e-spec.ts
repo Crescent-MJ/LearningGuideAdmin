@@ -7,9 +7,8 @@ import { configureApp } from '../src/common/app-setup';
 import { PrismaService } from '../src/prisma/prisma.service';
 
 /**
- * Knowledge System 后端全流程 e2e（开发文档 §5.1、§5.3、§7 Phase 3）。
- * 连接本地开发库（与 .env 一致），测试数据自建自清：
- * afterAll 直接经 Prisma 清理 Release 与 Course（绕过删除保护接口）。
+ * Knowledge System 后端全流程 e2e（开发文档 §5.1、§5.3）。
+ * 2026-10-16 扁平化：Course → Page 两级（原 Lesson → Page 合并）。
  */
 describe('Knowledge API (e2e)', () => {
   let app: INestApplication<App>;
@@ -26,12 +25,11 @@ describe('Knowledge API (e2e)', () => {
   });
 
   afterAll(async () => {
-    // 清理本轮测试创建的课程及其关联（Lesson/Page 由级联、Release 手动先行）
     const courses = await prisma.course.findMany({
       where: {
         OR: [
           { title: { startsWith: 'E2E-' } },
-          { externalId: 'ext-quantum-001' }, // sync 导入测试课程
+          { externalId: 'ext-quantum-001' },
         ],
       },
       select: { id: true },
@@ -45,7 +43,6 @@ describe('Knowledge API (e2e)', () => {
   });
 
   let courseId: string;
-  let lessonId: string;
   let pageId: string;
   let releaseId: string;
 
@@ -59,7 +56,7 @@ describe('Knowledge API (e2e)', () => {
     expect(courseId).toBeDefined();
   });
 
-  it('POST /api/courses 缺少 title 应 400 VALIDATION_ERROR（§9.3）', async () => {
+  it('POST /api/courses 缺少 title 应 400 VALIDATION_ERROR', async () => {
     const res = await request(app.getHttpServer())
       .post('/api/courses')
       .send({ description: '无标题' })
@@ -79,7 +76,7 @@ describe('Knowledge API (e2e)', () => {
     );
   });
 
-  it('PUT /api/courses/:id 更新课程（§5.1.1）', async () => {
+  it('PUT /api/courses/:id 更新课程', async () => {
     const res = await request(app.getHttpServer())
       .put(`/api/courses/${courseId}`)
       .send({ description: '更新后的描述' })
@@ -95,76 +92,126 @@ describe('Knowledge API (e2e)', () => {
     expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
-  it('POST /api/courses/:courseId/lessons 创建章节（§5.1.2）', async () => {
+  it('POST /api/courses/:courseId/pages 创建页面（含 contentMd 与 sectionTags，§5.1.2）', async () => {
     const res = await request(app.getHttpServer())
-      .post(`/api/courses/${courseId}/lessons`)
-      .send({ title: '第一章', duration: 600 })
-      .expect(201);
-    lessonId = res.body.data.id;
-    expect(res.body.data.sortOrder).toBe(0);
-  });
-
-  it('POST /api/lessons/:lessonId/pages 创建页面（含 contentMd 与 tags，§5.1.3）', async () => {
-    const res = await request(app.getHttpServer())
-      .post(`/api/lessons/${lessonId}/pages`)
+      .post(`/api/courses/${courseId}/pages`)
       .send({
-        title: '1.1 概念',
-        contentMd: '# 概念\n\n公式 $E=mc^2$',
-        tags: ['Core Knowledge'],
+        title: 'Introduction',
+        contentMd: '# Overview\n\n公式 $E=mc^2$',
+        sectionTags: { 'h1-overview': ['Core Knowledge'] },
       })
       .expect(201);
     pageId = res.body.data.id;
     expect(res.body.data.contentMd).toContain('E=mc^2');
+    expect(res.body.data.sortOrder).toBe(0);
   });
 
-  it('GET /api/courses/:id 详情应含 Lessons 与 Pages（§5.1.1）', async () => {
+  it('GET /api/courses/:id 详情应含 Pages（§5.1.1）', async () => {
     const res = await request(app.getHttpServer())
       .get(`/api/courses/${courseId}`)
       .expect(200);
-    expect(res.body.data.lessons[0].pages[0].id).toBe(pageId);
+    expect(res.body.data.pages[0].id).toBe(pageId);
   });
 
   it('GET /api/pages/:id 返回 contentMd', async () => {
     const res = await request(app.getHttpServer())
       .get(`/api/pages/${pageId}`)
       .expect(200);
-    expect(res.body.data.title).toBe('1.1 概念');
+    expect(res.body.data.title).toBe('Introduction');
   });
 
-  it('PUT /api/pages/:id 更新内容与标签', async () => {
+  it('PUT /api/pages/:id 更新内容与 sectionTags', async () => {
     const res = await request(app.getHttpServer())
       .put(`/api/pages/${pageId}`)
-      .send({ contentMd: '# 更新', tags: ['Teaching Guidance'], sortOrder: 1 })
+      .send({ contentMd: '# 更新', sectionTags: { 'h1-geng-xin': ['Teaching Guidance'] }, sortOrder: 1 })
       .expect(200);
     expect(res.body.data.contentMd).toBe('# 更新');
   });
 
-  it('PUT /api/lessons/:id 更新章节', async () => {
-    const res = await request(app.getHttpServer())
-      .put(`/api/lessons/${lessonId}`)
-      .send({ title: '第一章（改）', duration: 900 })
+  it('PUT /api/courses/:courseId/pages/reorder 批量重排 Page 顺序（§5.1.2，2026-10-19 新增）', async () => {
+    const extra = await request(app.getHttpServer())
+      .post(`/api/courses/${courseId}/pages`)
+      .send({ title: 'Extensions', contentMd: '# Extensions' })
+      .expect(201);
+    const extraId = extra.body.data.id as string;
+
+    await request(app.getHttpServer())
+      .put(`/api/courses/${courseId}/pages/reorder`)
+      .send({ orderedIds: [extraId, pageId] })
       .expect(200);
-    expect(res.body.data.title).toBe('第一章（改）');
+
+    const detail = await request(app.getHttpServer())
+      .get(`/api/courses/${courseId}`)
+      .expect(200);
+    expect(detail.body.data.pages.map((p: { id: string }) => p.id)).toEqual([
+      extraId,
+      pageId,
+    ]);
+    expect(
+      detail.body.data.pages.map((p: { sortOrder: number }) => p.sortOrder),
+    ).toEqual([0, 1]);
+
+    // 还原顺序并删除临时页，避免影响后续发布快照断言
+    await request(app.getHttpServer())
+      .put(`/api/courses/${courseId}/pages/reorder`)
+      .send({ orderedIds: [pageId, extraId] })
+      .expect(200);
+    await request(app.getHttpServer())
+      .delete(`/api/pages/${extraId}`)
+      .expect(200);
   });
 
-  it('PUT /api/lessons/:id/reorder 调整排序', async () => {
+  it('PUT /api/courses/:courseId/pages/reorder 非完整排列应 400 VALIDATION_ERROR', async () => {
     const res = await request(app.getHttpServer())
-      .put(`/api/lessons/${lessonId}/reorder`)
-      .send({ sortOrder: 5 })
-      .expect(200);
-    expect(res.body.data.sortOrder).toBe(5);
+      .put(`/api/courses/${courseId}/pages/reorder`)
+      .send({ orderedIds: ['00000000-0000-0000-0000-000000000000'] })
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('POST /api/courses/:id/release 发布快照（§5.1.4）', async () => {
+  it('PUT /api/courses/:courseId/pages/reorder 含重复 id 应 400 VALIDATION_ERROR', async () => {
+    // 造 2 个 Page，使 orderedIds 长度等于页数但含重复，命中重复校验分支
+    const extra = await request(app.getHttpServer())
+      .post(`/api/courses/${courseId}/pages`)
+      .send({ title: 'Extensions-Dup', contentMd: '# Dup' })
+      .expect(201);
+    const extraId = extra.body.data.id as string;
+
+    const res = await request(app.getHttpServer())
+      .put(`/api/courses/${courseId}/pages/reorder`)
+      .send({ orderedIds: [pageId, pageId] })
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+
+    await request(app.getHttpServer())
+      .delete(`/api/pages/${extraId}`)
+      .expect(200);
+  });
+
+  it('PUT /api/courses/:courseId/pages/reorder 空数组应 400 VALIDATION_ERROR', async () => {
+    const res = await request(app.getHttpServer())
+      .put(`/api/courses/${courseId}/pages/reorder`)
+      .send({ orderedIds: [] })
+      .expect(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('PUT /api/courses/:courseId/pages/reorder 课程不存在应 404 NOT_FOUND', async () => {
+    const res = await request(app.getHttpServer())
+      .put('/api/courses/00000000-0000-0000-0000-000000000000/pages/reorder')
+      .send({ orderedIds: ['00000000-0000-0000-0000-000000000000'] })
+      .expect(404);
+    expect(res.body.error.code).toBe('NOT_FOUND');
+  });
+
+  it('POST /api/courses/:id/release 发布快照（§5.1.3）', async () => {
     const res = await request(app.getHttpServer())
       .post(`/api/courses/${courseId}/release`)
       .send({ revisionNotes: 'e2e 首发' })
       .expect(201);
     releaseId = res.body.data.id;
-    expect(res.body.data.versionTag).toMatch(/^E2E-测试课程_\d{14}$/);
-    expect(res.body.data.snapshotData.lessons[0].pages[0].contentMd).toBe(
-      '# 更新',
-    );
+    expect(res.body.data.versionTag).toMatch(/^E2E-测试课程_\d{12}$/);
+    expect(res.body.data.snapshotData.pages[0].contentMd).toBe('# 更新');
   });
 
   it('POST /api/courses/:id/release 缺 revisionNotes 应 400', async () => {
@@ -181,7 +228,7 @@ describe('Knowledge API (e2e)', () => {
       .expect(200);
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].snapshotData).toBeUndefined();
-    expect(res.body.data[0].isActive).toBe(true); // 发布即激活（§3.4.3）
+    expect(res.body.data[0].isActive).toBe(true);
   });
 
   it('GET /api/releases/:releaseId 快照详情', async () => {
@@ -189,11 +236,10 @@ describe('Knowledge API (e2e)', () => {
       .get(`/api/releases/${releaseId}`)
       .expect(200);
     expect(res.body.data.revisionNotes).toBe('e2e 首发');
-    expect(res.body.data.snapshotData.lessons).toBeDefined();
+    expect(res.body.data.snapshotData.pages).toBeDefined();
   });
 
-  it('POST /api/courses/:id/activate-release 切换历史版本并重建草稿树（§3.4.2）', async () => {
-    // 先做一版新修改并发布 v2
+  it('POST /api/courses/:id/activate-release 切换历史版本并重建草稿（§3.4.2）', async () => {
     await request(app.getHttpServer())
       .put(`/api/pages/${pageId}`)
       .send({ contentMd: '# v2 草稿内容' })
@@ -203,7 +249,6 @@ describe('Knowledge API (e2e)', () => {
       .send({ revisionNotes: 'e2e 二发' })
       .expect(201);
 
-    // 切回 v1：草稿树应重建为 v1 内容，激活指针回到 v1
     const act = await request(app.getHttpServer())
       .post(`/api/courses/${courseId}/activate-release`)
       .send({ releaseId })
@@ -213,12 +258,10 @@ describe('Knowledge API (e2e)', () => {
     const detail = await request(app.getHttpServer())
       .get(`/api/courses/${courseId}`)
       .expect(200);
-    const pages = detail.body.data.lessons.flatMap((l: { pages: unknown[] }) => l.pages);
+    const pages = detail.body.data.pages;
     expect(pages).toHaveLength(1);
-    expect(pages[0].contentMd).toBe('# 更新'); // v1 快照内容覆盖草稿
+    expect(pages[0].contentMd).toBe('# 更新');
     expect(pages[0].syncState).toBe('SYNCED');
-    // 树已重建（新 ID），回写供后续 DELETE 用例使用
-    lessonId = detail.body.data.lessons[0].id as string;
     pageId = pages[0].id as string;
 
     const list = await request(app.getHttpServer())
@@ -255,34 +298,23 @@ describe('Knowledge API (e2e)', () => {
     expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
-  it('DELETE /api/lessons/:id 删除章节（级联 Page）', async () => {
-    await request(app.getHttpServer())
-      .delete(`/api/lessons/${lessonId}`)
-      .expect(200);
-    expect(
-      await prisma.page.count({ where: { lessonId } }),
-    ).toBe(0);
-  });
-
-  it('POST /api/sync/all 导入外部课程并幂等（§3.2.2/§5.1.5）', async () => {
-    // 选择外部独有、本地未导入的课程做导入测试，避免污染 demo 数据
+  it('POST /api/sync/all 导入外部课程并幂等（§3.2.2/§5.1.4）', async () => {
     const externalId = 'ext-quantum-001';
     const res = await request(app.getHttpServer())
       .post('/api/sync/all')
       .send({ externalId })
       .expect(201);
     expect(res.body.success).toBe(true);
-    // 首次导入：1 章 + 2 页全部新建
-    expect(res.body.data.created).toBeGreaterThanOrEqual(3);
+    // 外部量子课程 1 Lesson（含 2 Page）→ 合并为 1 个本地 Page
+    expect(res.body.data.created).toBeGreaterThanOrEqual(1);
     expect(res.body.data.unchanged).toBe(false);
 
-    // 本地课程应带外部内容落库
     const course = await prisma.course.findFirst({
       where: { externalId },
-      include: { lessons: { include: { pages: true } } },
+      include: { pages: true },
     });
     expect(course).not.toBeNull();
-    const firstPage = course!.lessons[0].pages[0];
+    const firstPage = course!.pages[0];
     expect(firstPage.contentMd.length).toBeGreaterThan(0);
     expect(firstPage.syncState).toBe('SYNCED');
 
@@ -302,7 +334,7 @@ describe('Knowledge API (e2e)', () => {
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('GET /api/sync/external-courses 返回外部课程列表与状态（§5.1.5）', async () => {
+  it('GET /api/sync/external-courses 返回外部课程列表与状态（§5.1.4）', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/sync/external-courses')
       .expect(200);
@@ -311,11 +343,10 @@ describe('Knowledge API (e2e)', () => {
       (c: { externalId: string }) => c.externalId === 'ext-quantum-001',
     );
     expect(quantum).toBeDefined();
-    // 上一步已导入，状态应为 synced
     expect(quantum.status).toBe('synced');
   });
 
-  it('未知路由应返回统一 404 信封且无堆栈泄露（§5.3、§9）', async () => {
+  it('未知路由应返回统一 404 信封且无堆栈泄露', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/not-exist')
       .expect(404);

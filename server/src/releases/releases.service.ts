@@ -7,49 +7,36 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateReleaseDto } from './dto/create-release.dto';
 import { ActivateReleaseDto } from './dto/activate-release.dto';
 
-/** snapshotData 结构（开发文档 §2 Release 模型注释；lessons/pages 均按 sortOrder 升序） */
+/** snapshotData 结构（开发文档 §2 Release 模型；2026-10-16 扁平化：lessons → pages；去 tags） */
 interface SnapshotPage {
   id: string;
   title: string;
   contentMd: string;
-  tags?: unknown;
-}
-interface SnapshotLesson {
-  id: string;
-  title: string;
-  pages?: SnapshotPage[];
+  sectionTags?: unknown;
 }
 interface SnapshotData {
-  lessons?: SnapshotLesson[];
+  pages?: SnapshotPage[];
 }
 
-/** 发布与版本（开发文档 §5.1.4、§3.4；2026-10-15 拍板：发布即激活 + 历史版本可切换，§3.4.2/§3.4.3） */
+/** 发布与版本（开发文档 §5.1.3、§3.4；发布即激活 + 历史版本可切换） */
 @Injectable()
 export class ReleasesService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
-   * 发布 Course 快照并激活：将当前 Lessons/Pages 内容固化为不可变 snapshotData，
+   * 发布 Course 快照并激活：将当前 Pages 内容固化为不可变 snapshotData，
    * 并将 Course.currentReleaseId 指向新 Release（发布即激活，§3.4.3）。
-   * 快照仅收录 syncState=SYNCED 节点（延续 §3.2.2「STALE 不作 AI 知识库」）。
-   * versionTag 格式: "CourseName_YYYYMMDDHHmm"（精确到分钟，2026-10-15 拍板去秒，§2 Release 模型）。
+   * 快照仅收录 syncState=SYNCED 节点。
+   * versionTag 格式: "CourseName_YYYYMMDDHHmm"。
    */
   async publish(courseId: string, dto: CreateReleaseDto) {
-    // §3.4.3「单事务」：读取草稿树与写入快照/激活指针同一事务，
-    // 消除「读取后、提交前」并发编辑导致快照与草稿脱节的窗口
     return this.prisma.$transaction(async (tx) => {
       const course = await tx.course.findUnique({
         where: { id: courseId },
         include: {
-          lessons: {
+          pages: {
             where: { syncState: 'SYNCED' },
             orderBy: { sortOrder: 'asc' },
-            include: {
-              pages: {
-                where: { syncState: 'SYNCED' },
-                orderBy: { sortOrder: 'asc' },
-              },
-            },
           },
         },
       });
@@ -57,15 +44,11 @@ export class ReleasesService {
         throw new NotFoundException('课程不存在');
       }
       const snapshotData = {
-        lessons: course.lessons.map((lesson) => ({
-          id: lesson.id,
-          title: lesson.title,
-          pages: lesson.pages.map((page) => ({
-            id: page.id,
-            title: page.title,
-            contentMd: page.contentMd,
-            tags: page.tags,
-          })),
+        pages: course.pages.map((page) => ({
+          id: page.id,
+          title: page.title,
+          contentMd: page.contentMd,
+          sectionTags: page.sectionTags,
         })),
       };
       const release = await tx.release.create({
@@ -85,7 +68,7 @@ export class ReleasesService {
   }
 
   /**
-   * 切换激活版本（§3.4.2）：单事务内校验归属 → 以快照重建 Lesson/Page 草稿树
+   * 切换激活版本（§3.4.2）：单事务内校验归属 → 以快照重建 Page 草稿
    * （覆盖当前草稿，含未发布修改；前端已二次确认）→ 更新 currentReleaseId。
    * 重建节点一律 syncState=SYNCED，后续 Sync 按标题匹配不受影响。
    */
@@ -105,26 +88,22 @@ export class ReleasesService {
     }
     const snapshot = release.snapshotData as unknown as SnapshotData;
     return this.prisma.$transaction(async (tx) => {
-      // Page 随 Lesson 级联删除（schema onDelete: Cascade）
-      await tx.lesson.deleteMany({ where: { courseId } });
-      for (const [li, lesson] of (snapshot.lessons ?? []).entries()) {
-        const created = await tx.lesson.create({
-          data: { courseId, title: lesson.title, sortOrder: li },
+      // 删除当前所有 Page（Course 级联无需管 Lesson）
+      await tx.page.deleteMany({ where: { courseId } });
+      for (const [pi, page] of (snapshot.pages ?? []).entries()) {
+        await tx.page.create({
+          data: {
+            courseId,
+            title: page.title,
+            contentMd: page.contentMd ?? '',
+            sectionTags:
+              page.sectionTags == null
+                ? undefined
+                : (page.sectionTags as Prisma.InputJsonValue),
+            sortOrder: pi,
+            syncState: 'SYNCED',
+          },
         });
-        for (const [pi, page] of (lesson.pages ?? []).entries()) {
-          await tx.page.create({
-            data: {
-              lessonId: created.id,
-              title: page.title,
-              contentMd: page.contentMd ?? '',
-              tags:
-                page.tags == null
-                  ? undefined
-                  : (page.tags as Prisma.InputJsonValue),
-              sortOrder: pi,
-            },
-          });
-        }
       }
       await tx.course.update({
         where: { id: courseId },
@@ -170,7 +149,7 @@ export class ReleasesService {
     return release;
   }
 
-  /** 本地时间 YYYYMMDDHHmm（精确到分钟，2026-10-15 拍板去秒） */
+  /** 本地时间 YYYYMMDDHHmm（精确到分钟） */
   private timestamp(): string {
     const d = new Date();
     const p = (n: number): string => String(n).padStart(2, '0');

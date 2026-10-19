@@ -1,13 +1,13 @@
 import {
-  IsArray,
   IsInt,
+  IsObject,
   IsOptional,
   IsString,
   MaxLength,
   Min,
 } from 'class-validator';
 
-/** 创建 Page（开发文档 §5.1.3、§2 Page 模型） */
+/** 创建 Page（开发文档 §5.1.2、§2 Page 模型；2026-10-16 移除页面级 tags） */
 export class CreatePageDto {
   @IsString()
   @MaxLength(200)
@@ -17,11 +17,10 @@ export class CreatePageDto {
   @IsString()
   contentMd!: string;
 
-  /** 标签数组，如 ["Core Knowledge", "Teaching Guidance"] */
+  /** H1-H6 级标签映射：{ "h{n}-slug": ["tag1"] }（2026-10-16） */
   @IsOptional()
-  @IsArray()
-  @IsString({ each: true })
-  tags?: string[];
+  @IsObject()
+  sectionTags?: Record<string, string[]>;
 
   /** 排序权重；缺省时追加到末尾 */
   @IsOptional()
@@ -29,3 +28,4 @@ export class CreatePageDto {
   @Min(0)
   sortOrder?: number;
 }
+
