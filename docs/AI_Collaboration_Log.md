@@ -5,6 +5,16 @@
 
 ---
 
+## 2026-10-20 ｜ 推送记录：AI tutor V1（分支 + PR）
+
+- **范围**：本次「攒批」全部变更一并提交推送——第六批（Releases 纯快照 / 版本删除双保护 / AI Tutor 未保存提醒）、第七批（「切换到此版本」语义收窄）、第八批（`editing` 标识下移 + 移除课程名 + editing 版本禁切换）、以及 AI Tutor 聊天用户气泡文字改白色。上述各批均已经 Review Agent 独立 APPROVE（0 Blocking）。
+- **提交**：`c3fbef9` ｜ `feat(ai-tutor): AI tutor V1`
+- **分支**：`feature/ai-tutor-v1`（已推送 origin，跟踪 origin/feature/ai-tutor-v1）
+- **PR**：https://github.com/Crescent-MJ/KnowledgeSystem/pull/6（base: main）
+- **状态**：PR 已建立，等待合并；UI 由用户手动冒烟。
+
+---
+
 ## 2026-10-20 ｜ AI Tutor 聊天：用户气泡文字改白色（细节调整）
 
 - **任务**（用户）：AI Tutor 的 Chat 区域，用户回答气泡背景为蓝色，**把气泡内文字改为白色**。
