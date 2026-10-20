@@ -13,6 +13,9 @@ import { AiChatService } from './ai-chat.service';
 import { AiConfigService } from './ai-config.service';
 import { ChatStreamDto } from './dto/chat-stream.dto';
 import { SaveAiConfigDto } from './dto/save-config.dto';
+import { ResetAiConfigDto } from './dto/reset-config.dto';
+import { SetOnlineDto } from './dto/set-online.dto';
+import { SetActiveReleaseDto } from './dto/set-active-release.dto';
 
 /**
  * AI Tutor 后端接口（开发文档 §5.2）。
@@ -49,10 +52,37 @@ export class AiController {
     return this.configs.saveConfig(dto);
   }
 
-  /** 重置为默认模板（§4.2.4） */
+  /** 重置为默认模板（§4.2.4；2026-10-20 二次改拍：body 带 mode，只重置该模式） */
   @Post('config/:courseId/reset')
-  resetConfig(@Param('courseId') courseId: string) {
-    return this.configs.resetConfig(courseId);
+  resetConfig(
+    @Param('courseId') courseId: string,
+    @Body() dto: ResetAiConfigDto,
+  ) {
+    return this.configs.resetConfig(courseId, dto.mode);
+  }
+
+  /** 设置「测试所选 Release」（§4.3.1/§5.2，2026-10-20 新增，持久化 Course.aiTestReleaseId） */
+  @Put('config/:courseId/active-release')
+  setActiveRelease(
+    @Param('courseId') courseId: string,
+    @Body() dto: SetActiveReleaseDto,
+  ) {
+    return this.configs.setActiveRelease(courseId, dto.releaseId);
+  }
+
+  /** 设置 Online 状态（§4.2.6，开关即时生效） */
+  @Put('config/:courseId/online')
+  setOnline(
+    @Param('courseId') courseId: string,
+    @Body() dto: SetOnlineDto,
+  ) {
+    return this.configs.setOnline(courseId, dto.online);
+  }
+
+  /** 列出全部 AI Tutor 及 Online 状态（§4.2.6，「管理所有 online」弹窗数据源） */
+  @Get('tutors')
+  listTutors() {
+    return this.configs.listTutors();
   }
 
   /**
@@ -91,5 +121,20 @@ export class AiController {
     } finally {
       res.end();
     }
+  }
+}
+
+/**
+ * 预留：用户侧 AI Tutor 接口（§4.2.6/§5.2，2026-10-20 拍板）。
+ * 仅预留路由与 Service 方法，**不实现业务逻辑**，供后续学生端接入。
+ */
+@Controller('user')
+export class UserAiController {
+  constructor(private readonly configs: AiConfigService) {}
+
+  /** 用户侧读取 Online AI Tutor 列表（预留钩子，当前返回 501 未实现） */
+  @Get('ai-tutors')
+  listOnlineTutors() {
+    return this.configs.listOnlineTutorsForUser();
   }
 }

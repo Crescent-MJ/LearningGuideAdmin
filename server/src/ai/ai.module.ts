@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AiChatService } from './ai-chat.service';
 import { AiConfigService } from './ai-config.service';
-import { AiController } from './ai.controller';
+import { AiController, UserAiController } from './ai.controller';
 import { CryptoService } from './crypto.service';
 import { OpenRouterProvider } from './providers/openrouter.provider';
 import { ProviderRegistry } from './providers/provider.registry';
@@ -12,7 +12,7 @@ import { RateLimitService } from './rate-limit.service';
  * PromptTemplate/配置接口 + AI Gateway Proxy（策略模式）+ SSE 流式对话 + 限流。
  */
 @Module({
-  controllers: [AiController],
+  controllers: [AiController, UserAiController],
   providers: [
     OpenRouterProvider,
     ProviderRegistry,

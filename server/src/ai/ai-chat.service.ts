@@ -83,14 +83,22 @@ export class AiChatService {
 
     const course = await this.prisma.course.findUnique({
       where: { id: dto.courseId },
-      select: { id: true, title: true, currentReleaseId: true },
+      select: {
+        id: true,
+        title: true,
+        currentReleaseId: true,
+        aiTestReleaseId: true,
+      },
     });
     if (!course) throw new NotFoundException('课程不存在');
 
+    // §4.3.1/§5.2（2026-10-20）：后台测试对话读「测试所选 Release」（aiTestReleaseId ?? currentReleaseId）
+    const releaseId = course.aiTestReleaseId ?? course.currentReleaseId;
+
     const [runtime, prompts, context] = await Promise.all([
-      this.configs.resolveRuntime(dto.courseId),
-      this.configs.resolvePrompts(dto.courseId, dto.mode),
-      this.buildContext(course.currentReleaseId),
+      this.configs.resolveRuntime(dto.courseId, releaseId, dto.mode),
+      this.configs.resolvePrompts(dto.courseId, releaseId, dto.mode),
+      this.buildContext(releaseId),
     ]);
 
     const systemParts = [prompts.systemPrompt];
@@ -135,21 +143,21 @@ export class AiChatService {
   }
 
   /**
-   * 知识库上下文聚合（§4.4.2 第 3 步，2026-10-15 拍板改 §4.3.3）：
-   * 读 Course.currentReleaseId 指向的激活 Release 快照，不再读实时草稿——
-   * 创建 Release 后未再次发布的编辑不影响 AI。快照本身已在发布时过滤 STALE 节点
+   * 知识库上下文聚合（§4.4.2 第 3 步，2026-10-15 拍板改 §4.3.3；2026-10-20 按 Release 维度）：
+   * 读「测试所选 Release」（Course.aiTestReleaseId ?? currentReleaseId）指向的 Release 快照，
+   * 不再读实时草稿——创建 Release 后未再次发布的编辑不影响 AI。快照本身已在发布时过滤 STALE 节点
    * （§3.4.3），此处无需再过滤。未发布过的课程直接报错交用户在 Knowledge Releases 页创建版本。
    */
   private async buildContext(
-    currentReleaseId: string | null,
+    releaseId: string | null,
   ): Promise<string> {
-    if (!currentReleaseId) {
+    if (!releaseId) {
       throw new BadRequestException(
         '该课程尚未发布知识库版本，请先在 Knowledge 模块 Releases 页创建版本',
       );
     }
     const release = await this.prisma.release.findUnique({
-      where: { id: currentReleaseId },
+      where: { id: releaseId },
       select: { snapshotData: true },
     });
     if (!release) {

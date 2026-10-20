@@ -4,17 +4,31 @@ import { http } from './client'
 
 export type AiMode = 'LECTURE' | 'SOCRATIC'
 
+/** 单模式的 AI 配置（§4.2.1–§4.2.3，2026-10-20 二次改拍按模式分开） */
+export interface AiModeView {
+  /** 自定义覆盖值（null = 未自定义，前端回退该模式模板默认值） */
+  systemPrompt: string | null
+  welcomeMsg: string | null
+  /** 该模式生效模型（自定义 ?? AI_AVAILABLE_MODELS[0]） */
+  model: string
+}
+
 export interface AiConfigView {
   courseId: string
+  /** 「测试所选 Release」id（2026-10-20 按 Release 维度；§5.2） */
+  releaseId: string | null
+  /** 「测试所选 Release」versionTag（§4.3.1 对话头部展示） */
+  releaseTag: string | null
+  /** 测试所选 Release 是否为上线版本（决定头部徽章 Testing / Live） */
+  isLive: boolean
   llmProvider: string
-  llmModel: string
-  customSystemPrompt: string | null
-  customWelcomeMsg: string | null
-  lectureTemplateId: string | null
-  socraticTemplateId: string | null
   hasApiKey: boolean
-  /** 当前课程激活版本的 versionTag（§4.3.1 对话头部展示） */
-  currentReleaseTag: string | null
+  /** 是否对用户侧开放（课程级，§4.2.6） */
+  online: boolean
+  /** Lecture 模式配置 */
+  lecture: AiModeView
+  /** Socratic 模式配置 */
+  socratic: AiModeView
 }
 
 export interface PromptTemplate {
@@ -25,21 +39,46 @@ export interface PromptTemplate {
   isDefault: boolean
 }
 
+/** 「管理所有 online」弹窗的行视图（§4.2.6） */
+export interface AiTutorListView {
+  courseId: string
+  title: string
+  online: boolean
+}
+
 export const aiApi = {
   listModels: () => http.get<string[]>('/ai/models').then((r) => r.data),
   listPrompts: () =>
     http.get<PromptTemplate[]>('/ai/prompts').then((r) => r.data),
   getConfig: (courseId: string) =>
     http.get<AiConfigView>(`/ai/config/${courseId}`).then((r) => r.data),
+  /** 保存配置（§4.2.5；2026-10-20 二次改拍：带 mode，只写该模式的三项值） */
   saveConfig: (data: {
     courseId: string
+    mode: AiMode
     llmProvider: string
+    systemPrompt?: string
+    welcomeMsg?: string
     llmModel: string
-    customSystemPrompt?: string
-    customWelcomeMsg?: string
   }) => http.put<AiConfigView>('/ai/config', data).then((r) => r.data),
-  resetConfig: (courseId: string) =>
-    http.post<AiConfigView>(`/ai/config/${courseId}/reset`).then((r) => r.data),
+  /** 重置为默认模板（§4.2.4；2026-10-20 二次改拍：带 mode，只重置该模式） */
+  resetConfig: (courseId: string, mode: AiMode) =>
+    http
+      .post<AiConfigView>(`/ai/config/${courseId}/reset`, { mode })
+      .then((r) => r.data),
+  /** 设置 Online 状态（§4.2.6，开关即时生效） */
+  setOnline: (courseId: string, online: boolean) =>
+    http
+      .put<AiConfigView>(`/ai/config/${courseId}/online`, { online })
+      .then((r) => r.data),
+  /** 设置「测试所选 Release」（§4.3.1/§5.2，2026-10-20 新增） */
+  setActiveRelease: (courseId: string, releaseId: string) =>
+    http
+      .put<AiConfigView>(`/ai/config/${courseId}/active-release`, { releaseId })
+      .then((r) => r.data),
+  /** 全部 AI Tutor 及 Online 状态（§4.2.6，「管理所有 online」弹窗数据源） */
+  listTutors: () =>
+    http.get<AiTutorListView[]>('/ai/tutors').then((r) => r.data),
 }
 
 /** SSE 帧回调：delta 增量 / done 结束 / error 错误 */

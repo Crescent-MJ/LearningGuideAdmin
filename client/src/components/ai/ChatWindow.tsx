@@ -4,18 +4,21 @@ import {
   Avatar,
   Button,
   Card,
+  Dropdown,
   Empty,
   Input,
   Segmented,
   Space,
   Spin,
   Tag,
+  type MenuProps,
 } from '../ui'
 import { PlusOutlined, RobotOutlined, SendOutlined, UserOutlined } from '@ant-design/icons'
 import MDEditor from '@uiw/react-md-editor'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import { useAiStore, type ChatMessage } from '../../stores/aiStore'
+import { useUnsavedGuard } from './useUnsavedGuard'
 import { tokens } from '../../theme/tokens'
 
 const katexPlugins = {
@@ -27,7 +30,105 @@ const katexPlugins = {
 const AI_AVATAR = <RobotOutlined />
 const USER_AVATAR = <UserOutlined />
 
-/** 单条消息气泡：带头像，AI 左侧灰底，用户右侧蓝底（§4.3.4） */
+/**
+ * 动态状态徽章（§4.3.1，2026-10-20）：测试所选 Release == 上线版本 → Live，否则 Testing。
+ * 浅绿底 + 绿点 + 绿字（与顶部栏原静态 Testing 徽章同风格）。
+ */
+function StateBadge({ live }: { live: boolean }) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '2px 10px',
+        borderRadius: 999,
+        background: '#ECFDF3',
+        color: tokens.color.success,
+        fontSize: tokens.fontSize.md,
+        fontWeight: tokens.fontWeight.semibold,
+        lineHeight: '18px',
+      }}
+    >
+      <span
+        aria-hidden
+        style={{ width: 6, height: 6, borderRadius: '50%', background: tokens.color.success }}
+      />
+      {live ? 'Live' : 'Testing'}
+    </span>
+  )
+}
+
+/**
+ * 知识库 Release 选择器（§4.3.1，2026-10-20）：
+ * versionTag（蓝色可点击）→ 展开按发布倒序的 Release 下拉（上线行带 Live 徽章、当前项高亮）；
+ * 右侧动态徽章 + Set Live 按钮。切换时若有未保存改动 → 弹未保存提醒（保存 / 取消；§4.3.6）。
+ */
+function ReleaseSelector() {
+  const config = useAiStore((s) => s.config)
+  const releases = useAiStore((s) => s.releases)
+  const selectRelease = useAiStore((s) => s.selectRelease)
+  const setLive = useAiStore((s) => s.setLive)
+  const guard = useUnsavedGuard()
+
+  const currentId = config?.releaseId ?? null
+  const live = config?.isLive ?? false
+
+  const pick = async (releaseId: string) => {
+    if (releaseId === currentId) return
+    if (!(await guard())) return
+    await selectRelease(releaseId)
+  }
+
+  const items: MenuProps['items'] = releases.length
+    ? releases.map((r) => ({
+        key: r.id,
+        label: (
+          <Space size="small">
+            <span>{r.versionTag}</span>
+            {r.isActive && <Tag color="green">Live</Tag>}
+          </Space>
+        ),
+      }))
+    : [{ key: '__none', label: '暂无 Release', disabled: true }]
+
+  return (
+    <Space size="small">
+      <Dropdown
+        trigger={['click']}
+        disabled={!releases.length}
+        menu={{
+          items,
+          selectedKeys: currentId ? [currentId] : [],
+          onClick: ({ key }) => {
+            if (key !== '__none') void pick(key)
+          },
+        }}
+      >
+        <span
+          style={{
+            color: tokens.color.primary,
+            cursor: releases.length ? 'pointer' : 'default',
+            fontSize: tokens.fontSize.xl,
+            fontWeight: tokens.fontWeight.semibold,
+          }}
+        >
+          {config?.releaseTag ?? '未发布'}
+        </span>
+      </Dropdown>
+      <StateBadge live={live} />
+      <Button
+        type="primary"
+        disabled={!currentId || live}
+        onClick={() => void setLive()}
+      >
+        Set Live
+      </Button>
+    </Space>
+  )
+}
+
+/** 单条消息气泡：带头像，AI 左侧灰底，用户右侧蓝底（§4.3.5） */
 function Bubble({ msg }: { msg: ChatMessage }) {
   const isUser = msg.role === 'user'
   return (
@@ -57,7 +158,7 @@ function Bubble({ msg }: { msg: ChatMessage }) {
         }}
       >
         {msg.content ? (
-          <div data-color-mode="light">
+          <div data-color-mode="light" className={isUser ? 'chat-bubble-user' : undefined}>
             <MDEditor.Markdown
               source={msg.content}
               {...katexPlugins}
@@ -81,10 +182,10 @@ export function ChatWindow() {
   const streaming = useAiStore((s) => s.streaming)
   const error = useAiStore((s) => s.error)
   const selectedCourseId = useAiStore((s) => s.selectedCourseId)
-  const currentReleaseTag = useAiStore((s) => s.config?.currentReleaseTag)
   const setMode = useAiStore((s) => s.setMode)
   const newChat = useAiStore((s) => s.newChat)
   const send = useAiStore((s) => s.send)
+  const guard = useUnsavedGuard()
 
   const [input, setInput] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
@@ -101,29 +202,37 @@ export function ChatWindow() {
     await send(text)
   }
 
+  /** 切换模式前先过未保存提醒（§4.3.6）：保存成功才切换，取消则丢弃改动后切换 */
+  const onModeChange = async (v: string) => {
+    if (!(await guard())) return
+    await setMode(v as 'LECTURE' | 'SOCRATIC')
+  }
+
   return (
     <Card
       style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
       styles={{ body: { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 } }}
       title={
         <Space size="middle" style={{ width: '100%', justifyContent: 'space-between' }}>
-          {/* 左侧：激活版本号 + Testing 徽章（§4.3.1） */}
-          <Space>
-            <span style={{ fontSize: tokens.fontSize.xl }}>{currentReleaseTag ?? '未发布'}</span>
-            <Tag color="green">Testing</Tag>
-          </Space>
+          {/* 左侧：知识库 Release 选择器 + 动态徽章 + Set Live（§4.3.1） */}
+          <ReleaseSelector />
           {/* 中间：模式切换（蓝色高亮选中项） */}
           <Segmented
             className="ai-mode-segmented"
             value={mode}
-            onChange={(v) => void setMode(v as 'LECTURE' | 'SOCRATIC')}
+            onChange={(v) => void onModeChange(v as string)}
             options={[
               { label: 'Lecture', value: 'LECTURE' },
               { label: 'Socratic', value: 'SOCRATIC' },
             ]}
           />
-          {/* 右侧：New Chat */}
-          <Button size="small" icon={<PlusOutlined />} onClick={newChat}>
+          {/* 右侧：New Chat（主色实心主按钮 + 前置 "+" 图标，2026-10-20 按参考图调整） */}
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            style={{ fontWeight: tokens.fontWeight.semibold }}
+            onClick={newChat}
+          >
             New Chat
           </Button>
         </Space>

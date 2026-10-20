@@ -33,12 +33,20 @@ export interface ReleaseSummary {
   versionTag: string
   revisionNotes: string
   createdAt: string
+  /** 是否为 Live（上线）版本（2026-10-20 语义：`currentReleaseId`） */
   isActive: boolean
+  /** 是否为 AI Tutor 后台「测试所选 Release」（2026-10-20 新增；删除保护用） */
+  isTestSelected: boolean
+  /** 是否为当前编辑版本（2026-10-20 新增：`Course.editingReleaseId`；历史弹窗 `editing` 标识） */
+  isEditing: boolean
 }
 
-export interface ReleaseDetail extends Omit<ReleaseSummary, 'isActive'> {
+export interface ReleaseDetail
+  extends Omit<ReleaseSummary, 'isActive' | 'isTestSelected' | 'isEditing'> {
   courseId: string
   isActive?: boolean
+  isTestSelected?: boolean
+  isEditing?: boolean
   snapshotData: {
     pages: Array<{
       id: string
@@ -118,12 +126,24 @@ export const knowledgeApi = {
     http.get<ReleaseSummary[]>(`/courses/${courseId}/releases`).then((r) => r.data),
   getRelease: (releaseId: string) =>
     http.get<ReleaseDetail>(`/releases/${releaseId}`).then((r) => r.data),
+  /** 删除版本（§3.4.5，2026-10-20 新增）：Live / 后台测试所选版本后端返回 409 */
+  deleteRelease: (releaseId: string) =>
+    http
+      .delete<{ id: string; versionTag: string }>(`/releases/${releaseId}`)
+      .then((r) => r.data),
   activateRelease: (courseId: string, releaseId: string) =>
     http
       .post<{ id: string; versionTag: string }>(
         `/courses/${courseId}/activate-release`,
         { releaseId },
       )
+      .then((r) => r.data),
+  /** Set Live（§3.4.4，2026-10-20 新增）：轻量切换上线指针，不重建草稿 */
+  setLive: (courseId: string, releaseId: string) =>
+    http
+      .post<{ id: string; versionTag: string }>(`/courses/${courseId}/set-live`, {
+        releaseId,
+      })
       .then((r) => r.data),
 
   // 同步（§5.1.4 / §3.2.2 外部源接管模型）
