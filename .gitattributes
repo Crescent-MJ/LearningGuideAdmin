@@ -1,0 +1,3 @@
+# 跨平台换行符策略
+# core.autocrlf=true 时 Windows 检出会把内容转成 CRLF，会破坏 bash 脚本，故强制 shell 脚本为 LF
+*.sh text eol=lf

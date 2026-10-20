@@ -36,6 +36,26 @@ client/      前端（React + Vite + Ant Design 5.x，Phase 1 已搭建）
 - **Git**：`feature/<task>` 分支日常开发；大迭代（Phase 完成/阶段性交付）推送分支并发 PR 到 main，合并条件 = 审查通过（大迭代完整定义见 [.trae/rules/project_rules.md](.trae/rules/project_rules.md)）
 - **注册智能体**：将 agents/ 下两个文件的「系统提示词」段落粘贴到 Trae 智能体创建界面即可；项目协作规则见 [.trae/rules/project_rules.md](.trae/rules/project_rules.md)
 
+## 一键安装环境
+
+本项目为 **Node.js** 工程（**无 Python / venv**）：依赖版本由 `server/package-lock.json`、`client/package-lock.json` 锁定，Node 版本见 `.nvmrc` 与各 `package.json` 的 `engines`；JS 依赖就地隔离在各自的 `node_modules`（等价于 Python 的 venv）。
+
+前置要求：Node.js ≥ 22.12（`nvm use` 自动读取 `.nvmrc`）、npm ≥ 10；数据库二选一——本机 PostgreSQL，或 Docker 一键起库。
+
+```powershell
+# Windows
+.\setup.ps1                 # 安装 Node 依赖 + 生成 server/.env
+.\setup.ps1 -WithDocker     # 额外用 Docker 启动 PostgreSQL 16
+```
+
+```bash
+# macOS / Linux / WSL
+./setup.sh                  # 安装 Node 依赖 + 生成 server/.env
+./setup.sh --with-docker    # 额外用 Docker 启动 PostgreSQL 16
+```
+
+脚本不会写入任何密钥；`server/.env` 由 `server/.env.example` 复制而来，请自行填写 `DATABASE_URL` 与 `AI_CONFIG_ENCRYPTION_KEY`。
+
 ## 开发
 
 ### 后端（server/）
@@ -56,8 +76,13 @@ npm install
 npm run dev              # http://localhost:5173
 ```
 
+> 注：`npm install` 适合已有 `node_modules` 的增量更新；若要与 `package-lock.json` 严格一致（首次安装 / CI），请改用 `npm ci`（见上文「一键安装环境」）。
+
 ### 数据库
 
-本机 PostgreSQL 16（Windows 服务名 `postgresql-x64-16`），账号/密码均为 admin，
-库名 learning_guide_db；连接串存于 `server/.env`（不入库），模板见 `server/.env.example`。
-表结构变更只走 Prisma Migrate，禁止手改数据库。
+二选一：
+
+- **本机 PostgreSQL 16**（Windows 服务名 `postgresql-x64-16`），账号/密码均为 admin，库名 learning_guide_db；
+- **Docker 一键起库**：`docker compose up -d postgres`（镜像 `postgres:16`，默认 admin/admin@localhost:5432；若 5432 被占用可 `POSTGRES_PORT=5433 docker compose up -d postgres`）。
+
+连接串存于 `server/.env`（不入库），模板见 `server/.env.example`。表结构变更只走 Prisma Migrate，禁止手改数据库。

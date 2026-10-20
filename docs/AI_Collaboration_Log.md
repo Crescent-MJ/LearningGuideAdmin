@@ -5,6 +5,26 @@
 
 ---
 
+## 2026-10-20 ｜ 一键安装环境（Node 原生）＋第二仓库首次导入
+
+- **任务（用户）**：确认「本项目是不是缺一键安装环境的功能」，要求提供「一个可读文件声明所需环境与版本 + 一键安装」，并问「是否用了本机本地环境」、提出「用 venv 作为环境库」。
+- **事实澄清**：本项目为 **Node.js**（NestJS 后端 + React/Vite 前端），全仓无任何 Python 文件，**无 venv / requirements 概念**；等价物为 `package.json` + `package-lock.json`（依赖及版本锁定）。JS 依赖已就地隔离在各自 `node_modules`（隔离效果等价 venv），但 Node 运行时与 PostgreSQL 属系统级依赖。
+- **用户拍板**：按 **Node 原生方式**；提供 `setup.ps1`（Windows）+ `setup.sh`（bash）+ `docker-compose.yml`（PostgreSQL）；**不引入 venv**。
+- **变更清单**：
+  - 新增 `.nvmrc`（`24.15.0`）；新增 `.gitattributes`（`*.sh text eol=lf`，因本仓 core.autocrlf=true）
+  - 新增 `setup.ps1` / `setup.sh`：校验 Node≥22 → `npm ci`（server/client）→ 由 `.env.example` 生成 `server/.env`（不覆盖）→ 可选 `docker compose up -d postgres` → 打印后续步骤；**不写入任何密钥**
+  - 新增 `docker-compose.yml`（postgres:16-alpine，默认 admin/admin/learning_guide_db，端口与凭据可用 `${VAR:-default}` 覆盖，命名卷 `lgbo_pgdata` + healthcheck）
+  - 修改 `server/package.json`、`client/package.json`：新增 `engines`（node ≥22.12.0、npm ≥10）
+  - 修改 `server/.env.example`：DATABASE_URL 占位串改为 `admin:admin@localhost:5432/learning_guide_db`（与 docker / 本机默认一致；README 早已公开该凭据）
+  - 修改 `README.md`：新增「一键安装环境」章节；「数据库」补 Docker 选项
+- **自测证据**：`setup.ps1` PowerShell 解析器 ParseFile → OK（**已加 UTF-8 BOM**，修复 PS5.1 无 BOM 按 ANSI 误读中文导致的引号失配）；空跑 `-SkipServer -SkipClient` 成功且中文输出正常；`bash -n setup.sh` exit 0、文件 0 个 CR（LF）；`docker compose config --quiet` exit 0、healthcheck 解析为 `pg_isready -U admin -d learning_guide_db`；两 `package.json` JSON 可解析；`git check-ignore server/.env` 命中 → **零密钥落盘**成立。
+- **审查结论**：Review Agent（独立新上下文）**APPROVE（0 Blocking）**。Non-blocking 5 项：① 本条目此前缺失（现已补）② 脚本仅比较 Node major 而 engines 为 ≥22.12 ③ 覆盖 DB 凭据时未同步传 `POSTGRES_USER/PASSWORD/DB` 给 compose ④ README `npm install` 与脚本 `npm ci` 语义差异需一句说明 ⑤ `docs/` 两文件显示 M 但内容与 HEAD 逐字节一致（换行工件，非本次内容）。
+- **Git**：工作区未提交（另含用户对 README / 开发文档 / 本日志的编辑）。
+- **下一步**：已按用户裁决修复 Non-blocking ②③④——②Node 版本校验对齐 22.12（比较 major.minor）；③覆盖 DB 凭据时同步传 `POSTGRES_USER/PASSWORD/DB` 给 compose；④README 开发段补 `npm ci` / `npm install` 说明；复测通过；工作区仍未提交。
+- **复审（增量）**：Review Agent（独立新上下文）**APPROVE（0 Blocking）**。仅 1 项文档一致性非阻塞（README「Node.js ≥ 22」应为 ≥ 22.12），已照改（文档笔误级，豁免门禁）。
+
+---
+
 ## 2026-10-20 ｜ 推送记录：AI tutor V1（分支 + PR）
 
 - **范围**：本次「攒批」全部变更一并提交推送——第六批（Releases 纯快照 / 版本删除双保护 / AI Tutor 未保存提醒）、第七批（「切换到此版本」语义收窄）、第八批（`editing` 标识下移 + 移除课程名 + editing 版本禁切换）、以及 AI Tutor 聊天用户气泡文字改白色。上述各批均已经 Review Agent 独立 APPROVE（0 Blocking）。
