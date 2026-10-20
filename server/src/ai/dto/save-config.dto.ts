@@ -6,29 +6,35 @@ import {
   MaxLength,
 } from 'class-validator';
 
-/** PUT /api/ai/config 请求体（§4.2.5 / §5.2） */
+/** PUT /api/ai/config 请求体（§4.2.5 / §5.2；2026-10-20 二次改拍：新增 mode，只写该模式） */
 export class SaveAiConfigDto {
   @IsUUID()
   courseId!: string;
+
+  /** 当前保存的模式：只写该模式的 System Prompt / Welcome Message / Model */
+  @IsIn(['LECTURE', 'SOCRATIC'])
+  mode!: 'LECTURE' | 'SOCRATIC';
 
   @IsString()
   @IsIn(['openrouter'])
   llmProvider!: string;
 
+  /** 该模式生效模型 */
   @IsString()
   @MaxLength(100)
   llmModel!: string;
 
-  /** 自定义 System Prompt（优先级高于模板）；显式传空字符串表示清除 */
+  /** 该模式自定义 System Prompt（优先级高于该模式模板）；省略/空串表示清除 */
   @IsOptional()
   @IsString()
   @MaxLength(20000)
-  customSystemPrompt?: string;
+  systemPrompt?: string;
 
+  /** 该模式自定义 Welcome Message；省略/空串表示清除 */
   @IsOptional()
   @IsString()
   @MaxLength(2000)
-  customWelcomeMsg?: string;
+  welcomeMsg?: string;
 
   /**
    * 课程级 API Key 明文（仅入参方向）：服务端立即加密存储；

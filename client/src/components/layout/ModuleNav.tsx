@@ -27,6 +27,7 @@ export function ModuleNav({
     <nav
       style={{
         width: 160,
+        height: '100%',
         flexShrink: 0,
         background: tokens.color.bg.container,
         borderRight: `1px solid ${tokens.color.border}`,

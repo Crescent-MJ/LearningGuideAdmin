@@ -5,6 +5,198 @@
 
 ---
 
+## 2026-10-20 ｜ AI Tutor 聊天：用户气泡文字改白色（细节调整）
+
+- **任务**（用户）：AI Tutor 的 Chat 区域，用户回答气泡背景为蓝色，**把气泡内文字改为白色**。
+- **根因**：用户气泡容器已设 `color: tokens.color.bg.container`（#fff），但 `@uiw/react-md-editor` 的 `.wmde-markdown { color: var(--color-fg-default) }`（light 模式深色 #1F2328）优先级更高，白字不生效。
+- **变更**：`client/src/components/ai/ChatWindow.tsx`（`Bubble` 的 Markdown 外层 `<div data-color-mode="light">` 增 `className={isUser ? 'chat-bubble-user' : undefined}`）；`client/src/index.css`（新增 `.chat-bubble-user .wmde-markdown { color: var(--color-bg-container); }`，仅作用于用户气泡，AI 气泡灰底深字不变）。未改后端/Schema/接口，无需设计文档同步。
+- **自测证据**：client `npx tsc --noEmit` EXIT=0。UI/浏览器由用户手动冒烟（项目禁止 AI 浏览器操作）。
+- **审查结论**：Review Agent（独立新上下文）**APPROVE（0 Blocking）**。Non-blocking 1 条（气泡内链接仍为库色 `.wmde-markdown a` #0969da，蓝底对比度偏低；按本次「文字变白」范围可接受，后续可补 `a` 覆盖）。
+- **Git**：本地未提交（攒批；用户裁决先不推送）。
+- **下一步**：用户手动冒烟用户气泡白字效果；如需一并处理链接色可再提。
+
+---
+
+## 2026-10-20 ｜ 历史版本弹窗：editing 标识下移 + 移除课程名 + editing 版本禁切换（第八批）
+
+- **任务**（用户三项，据历史版本弹窗截图）：
+  1. 弹窗标题中的 **`Population Growth`（课程名）不需要**；
+  2. **`editing` 移动到下方版本名称的右侧（紧贴着）**；
+  3. **如果当前是 `editing`，则不能「切换到此版本」**。
+- **用户澄清裁决**（AskUserQuestion）：`editing` 判定＝**新建 Create Release 落在该新版本；若点击「切换到此版本」则落在被切换的版本**——据此新增 `Course.editingReleaseId`（当前编辑版本指针）。
+- **变更清单**（设计文档先行）：
+  - **设计文档**：§2（`Course` prisma 块新增 `editingReleaseId String?` + 改拍说明③）、§3.4.2（**三次改拍**：Modal 标题仅「历史版本」；`editing` 紧贴版本名右侧，标识 `Course.editingReleaseId`；标签定序 `editing`→`live`→`testing`；**editing 版本不显示「切换到此版本」**；`editing` 判定＝新建 Release / 切换到此版本；Set Live 不改；删除该版本时清空指针）、§3.4.3（Create Release 步骤增「置 `Course.editingReleaseId` = 新 Release」+ 三次改拍 note）、§3.4.5（删除时若为 editing 版本则同事务清空 `editingReleaseId`；注：editing 版本不属双保护、允许删除）、§5.1.3（GET releases 增 `isEditing`；publish/activate/delete 行补 editingReleaseId 口径）
+  - **Prisma**：`schema.prisma` `Course` 加 `editingReleaseId String?`（普通标量列，无 Prisma 外键）；新增迁移 `20261020093127_add_course_editing_release_id`（`ALTER TABLE "Course" ADD COLUMN "editingReleaseId" TEXT;`，仅 ADD COLUMN）
+  - **后端**：`releases.service.ts` —— `publish` 在 `release.create` 后 `tx.course.update({ data: { editingReleaseId: created.id } })`；`activate` 重建草稿后 `tx.course.update({ data: { editingReleaseId: release.id } })`；`findAllByCourse` course select 加 `editingReleaseId`、map 增 `isEditing: r.id === course.editingReleaseId`；`remove` course select 加 `editingReleaseId`，删除后若被删版本即 editing 版本则同事务置 null
+  - **前端**：`api/knowledge.ts`（`ReleaseSummary` 加 `isEditing: boolean`；`ReleaseDetail` 相应 Omit/可选）、`components/knowledge/PublishPanel.tsx`（Modal 标题改为固定 `"历史版本"`，移除 `Space`/课程名/`editing` 与 `historyCourseName`；版本行 `[versionTag][isEditing→<Tag green>editing</Tag>][live][testing]`；`isEditing` 行隐藏「切换到此版本」按钮）；头注释同步
+  - **测试**：`releases.service.spec.ts`（publish 断言 `course.update` 以 `editingReleaseId='r1'` 调用；activate 断言以 `editingReleaseId='r2'` 调用；findAllByCourse 增 `isEditing` 断言；remove 新增「删除 editing 版本清空指针」用例 + 普通删除断言不清指针）、`test/knowledge.e2e-spec.ts`（发布后 `isEditing=true`；activate 后 editing 落在被切换版本；新增「删除当前编辑版本清空 editing 指针」用例）
+- **自测证据**：server `npm run build`（nest build）EXIT=0；client `npx tsc --noEmit` EXIT=0；server 单测 **11 suites / 72 passed**；server e2e **5 suites / 70 passed**；`npx prisma migrate dev --name add_course_editing_release_id` 已应用到本地库。UI 由用户手动冒烟
+- **审查结论**：Review Agent（独立新上下文）**APPROVE（0 Blocking）**。核对确认：三需求逐条落实（标题去课程名 `PublishPanel.tsx:158`、editing 紧贴版本名 `:176-180`、editing 行隐藏切换按钮 `:185`）；editing 判定与用户裁决一致（publish/activate 两处写入、Set Live 不触碰）；`editingReleaseId` 为普通标量无外键、migration 与 schema 一致可重放；`remove` 仅在删 editing 版本时清空指针。Non-blocking 1 条（协作日志缺第八批条目——本条目即补；另 e2e 顺序耦合属既有模式）已处理
+- **Git**：本地未提交（攒批；用户裁决**先不推送**）
+- **下一步**：用户手动冒烟（历史弹窗标题仅「历史版本」、editing 紧贴版本名右侧、editing 版本无「切换到此版本」）；按用户裁决**本地攒批不推送**
+
+---
+
+## 2026-10-20 ｜ Releases「切换到此版本」语义收窄 + 历史弹窗标识调整（第七批）
+
+- **任务**（用户三项）：
+  1. **「切换到此版本」** 删掉「把 AI Tutor 上线版本切到该版本」的功能——**只能做编辑 md 中的快照切换**；
+  2. 历史窗口中的 **「当前编辑版本」移到当前编辑课程名右侧并改名为 `editing`**，**删掉**「正在编辑的草稿（与已发布快照区分）」内容；
+  3. **Live 版本的调整只能由 AI Tutor 板块操作**；历史窗口可展示 `testing` / `live` / `editing` 三种状态。
+- **用户澄清裁决**（AskUserQuestion）：Q1 弹窗标题为「历史版本」，其后紧贴**当前编辑课程名（绿色框）+ `editing`（绿色框）**；Q2「切换到此版本」按钮**所有版本（含 Live）都显示**。
+- **变更清单**（设计文档先行）：
+  - **设计文档**：§3.4.2（新增 2026-10-20 二次改拍——「切换到此版本」**仅恢复快照到可编辑草稿、不改 `currentReleaseId`**；Live 指针**只能由 AI Tutor 板块 §3.4.4「Set Live」变更**；按钮对所有版本显示；Modal 标题行改为「历史版本」+ 课程名（绿框）+ `editing`（绿框）；移除「当前编辑版本」行；`aiTestReleaseId` 标识由「测试所选」改 `testing`）、§3.4.3（「不更新 currentReleaseId」补充「Live 只能由 AI Tutor Set Live 变更」）、§3.4.4（改拍：**`currentReleaseId` 只能由 AI Tutor 板块 Set Live 变更**，Knowledge 不再有改 Live 入口）、§5.1.3（activate-release 行改为「恢复历史快照到可编辑草稿，不改 currentReleaseId」）
+  - **后端**：`releases.service.ts` `activate()` 删除 `tx.course.update({ currentReleaseId })`，仅保留「删现有 Page → 按 snapshotData 重建（`sortOrder`/`sectionTags` 原样、`syncState=SYNCED`）」；类注释同步
+  - **前端**：`components/knowledge/PublishPanel.tsx`（`doActivate` 确认文案改为只提「覆盖当前可编辑草稿」，**不再提 AI Tutor**；「切换到此版本」按钮改为**所有版本**显示；Modal 标题改为 `Space(「历史版本」+<Tag green>课程名</Tag>+<Tag green>editing</Tag>)`；移除原「当前编辑版本」展示行；`测试所选` 标签改 `testing`；新增 `Space` 导入 + `historyCourseName`）；头注释同步
+  - **测试**：`releases.service.spec.ts`（activate 用例断言 `mockTx.course.update` **未**被调用）、`test/knowledge.e2e-spec.ts`（activate-release 用例改为「先 set-live→v2 → activate releaseId → 断言草稿恢复为 releaseId 快照且 Live 仍指向 v2」）
+- **自测证据**：server `npm run build` EXIT=0；client `npx tsc -b` EXIT=0；server 单测 **11 suites / 71 passed**；server e2e **5 suites / 69 passed**。UI 由用户手动冒烟
+- **审查结论**：Review Agent（独立新上下文）**APPROVE（0 Blocking）**。核对确认：全仓唯一写 `currentReleaseId` 的仅 `setLive()`（AI Tutor 链路），Knowledge 板块无残留改 Live 入口；activate 重建保持 sortOrder/sectionTags/syncState；`historyCourseName` 课程未加载时回退空串安全。Non-blocking 3 条（快照 `SnapshotPage.id` 重建未复用、空快照会清空草稿、e2e 顺序耦合）均属既有设计内、无阻塞
+- **Git**：本地未提交（攒批；用户裁决**先不推送**）
+- **下一步**：用户手动冒烟（历史弹窗标题行课程名+editing、每版本 live/testing、切换到此版本不改 AI Tutor Live；Live 仅在 AI Tutor 用 Set Live 调整）；按用户裁决**本地攒批不推送**
+
+---
+
+## 2026-10-20 ｜ Releases 纯快照 + 版本删除（双保护）+ AI Tutor 未保存改动提醒（第六批）
+
+- **任务**（用户三项）：
+  1. **Knowledge → Releases**：Create Release 仅作**快照**，**不得影响 AI Tutor 的 Live 版本**；
+  2. **Releases 历史版本**：每个版本后加删除 ×（**Live 状态不可删**）；「激活中」文案改为 **live**；**新增「当前编辑版本」展示行**；
+  3. **AI Tutor**：修改 prompt / Welcome message / Model 后**未保存**即切换模式或其他操作会丢失改动——需新增**未保存提醒弹窗**（**保存 / 取消**两个按钮：保存＝走 Save Configuration；取消＝不保存并继续用户操作）。
+- **用户裁决**（AskUserQuestion 4 项）：Q1 Create Release ＝ **纯快照 + 不自动指向**（不改 `currentReleaseId`/`aiTestReleaseId`；「切换到此版本」activate 保留现状）；Q2「当前编辑版本」＝ **仅展示标识**（不可删除、无操作按钮）；Q3 删除 ＝ **双保护**（Live 版本与后台测试所选版本都禁删）；Q4 提醒触发场景 ＝ **切换 Lecture/Socratic 模式 + 切换课程（Change Course）+ 切换 Release 版本**（**不含 New Chat**）。
+- **变更清单**（设计文档先行）：
+  - **设计文档**：§3.4.1（Revision Notes/Latest Release 改「最新发布快照」口径）、§3.4.2（新增「当前编辑版本」行 + live 文案 + 删除 × + 双保护）、§3.4.3（Create Release 改**纯快照、不改 `currentReleaseId`** + 「纯快照改拍影响」说明：首次发布后 Live 指针仍空，需手动选择/Set Live）、§3.4.5（**新增删除版本 Delete Release**，双保护 409）、§4.2.5（新增「未保存改动提醒」bullet）、§4.3.1（切换 Release 弹未保存提醒，引用 §4.3.6）、§4.3.2（切换模式前弹未保存提醒 bullet）、§4.3.6（**新增未保存改动提醒 Unsaved Changes Guard** 完整定义）、§5.1.3（publish 行改纯快照；新增 `DELETE /api/releases/:releaseId`；GET releases 加 `isTestSelected`）
+  - **后端**：`releases.service.ts`（`publish` 删 `course.update` 改纯 `release.create`；`findAllByCourse` select 加 `aiTestReleaseId`、map 增 `isTestSelected`；**新增 `remove(releaseId)`**：事务内校验归属 → `currentReleaseId`/`aiTestReleaseId` 命中抛 `ConflictException` 409 → 否则删除）、`releases.controller.ts`（新增 `@Delete('releases/:releaseId')`）
+  - **前端 Knowledge**：`api/knowledge.ts`（`ReleaseSummary` 加 `isTestSelected`；新增 `deleteRelease`；`ReleaseDetail` 调整）、`components/knowledge/PublishPanel.tsx`（Revision Notes/Latest Release 改用最新快照；历史弹窗顶部加「当前编辑版本」展示行；live 文案；`protectedVersion = isActive || isTestSelected` 时隐藏删除 ×；新增 `doDelete` 二次确认）、`components/icons.tsx`（新增 `CloseIcon`）
+  - **前端 AI Tutor**：`stores/aiStore.ts`（`save()` 返回 `Promise<boolean>`）、`components/ai/useUnsavedGuard.ts`（**新建**共享 hook：无脏数据直接放行；有脏数据弹 保存/取消，保存失败中止原操作）、`components/ai/ChatWindow.tsx`（`ReleaseSelector` 与模式切换 `onModeChange` 接入 guard；移除本地 Modal）、`components/ai/ConfigPanel.tsx`（Change Course 改走 `onChangeCourse`：先 guard 再 `selectCourse`；`onSave` 按布尔返回值提示成功/失败）
+  - **测试**：`releases.service.spec.ts`（publish 断言不调用 `course.update`；findAllByCourse 断言 `isActive`/`isTestSelected`；**新增 remove 4 用例**：Live 409 / 测试所选 409 / 普通删除 / 404）、`test/knowledge.e2e-spec.ts`（改纯快照断言 + 新增 set-live isActive、DELETE Live 409、DELETE 测试所选 409、DELETE 普通成功）、`test/ai.e2e-spec.ts`（夹具改「发布后显式 Set Live」；active-release + set-live 用例按纯快照重排；限流课/隔离课补 set-live/active-release 前置）
+- **自测证据**：server `npm run build` EXIT=0；client `npx tsc -b` EXIT=0；server 单测 **11 suites / 71 tests passed**；server e2e **5 suites / 69 tests passed**。UI 外观/交互由用户手动冒烟
+- **审查结论**：Review Agent（独立新上下文）**APPROVE（0 Blocking）**。Non-blocking 4 条：① 本文档缺第六批条目（**本条目即补齐**）；② `PublishPanel.tsx` 头注释仍写「激活中/发布即激活」（**已同步修正**）；③ `useUnsavedGuard` 保存失败仅经 `aiStore.error`（ChatWindow Alert）呈现，未按 §4.3.6 显式 toast（属可选增强）；④ `onChangeCourse`/`onModeChange` 对 `selectCourse`/`setMode` 无 try/catch（沿袭既有模式，非本期引入）
+- **审查后续（2026-10-20 用户裁决「③④＋第五批遗留 saveConfig 空串语义 全部修复」）**：②③④ 已修 + ⑤ 第五批遗留 `saveConfig` 空串语义一并修复——`ai-config.service.ts` 改 `dto.systemPrompt || null`/`dto.welcomeMsg || null`（空串归一 null，对齐 §5.2 契约）；`useUnsavedGuard.ts` 保存失败改为显式 `message.error(...)` 后再 `resolve(ok)`；`aiStore.ts` 的 `selectCourse`/`setMode` 包 try/catch（异常写 `error` 状态、不抛，避免未捕获 rejection）。**复核（同一 Review Agent 续审）结论 APPROVE（0 Blocking，0 Non-blocking）**；复核证据：server build EXIT=0、client tsc EXIT=0、单测 **71/71**、e2e **69/69**（⑤ 对标 `|| null` 无 `''` 断言、无回归）
+- **Git**：本地未提交（攒批；用户裁决**先不推送**）
+- **下一步**：用户手动冒烟（Create Release 不影响 AI Tutor Live；历史弹窗「当前编辑版本」/live/删除 ×（Live 不可删）；改配置未保存时切换模式/课程/Release 弹 保存-取消）；按用户裁决**本地攒批不推送**
+
+---
+
+## 2026-10-20 ｜ AI Tutor 配置（System Prompt / Welcome / LLM Model）按模式（Lecture / Socratic）分开保存
+
+- **任务**（用户报告缺陷）：设置成 Live 之后点击 Lecture/Socratic 切换**无任何反应**；用户判断是 **Save Configuration** 的问题——一旦改动并 Save，切换模式就不再载入对应的 prompt / welcome / model。用户澄清：**Live 只是发布指令**（把当前版本推送到用户侧），**不影响后台测试**。
+- **根因**（已读码定位）：自定义配置 `customSystemPrompt / customWelcomeMsg / llmModel` 为**单一字段**（不区分模式），Save 后对两种模式同时生效，故切换模式来看「无变化」；Set Live 不改表单，故「Set Live 后无反应」同属该根因。
+- **用户裁决**（AskUserQuestion 3 项）：① System Prompt + Welcome Message = **按模式分别保存**；② LLM Model = **也按模式分开**；③ 存量单份自定义配置 = **回填到两个模式**。
+- **变更清单**（设计文档先行）：
+  - **设计文档**：§2 CourseAiConfig 拆为 `lectureSystemPrompt/socraticSystemPrompt/lectureWelcomeMsg/socraticWelcomeMsg`（String? @db.Text）+ `lectureModel/socraticModel`（String?，null 回退 AI_AVAILABLE_MODELS[0]）+ 共享 `llmProvider/llmBaseUrl/apiKey`，删 `customSystemPrompt/customWelcomeMsg/llmModel`；§4.2.1/§4.2.2「按模式分开保存」bullet；§4.2.3 按模式 + 回退默认；§4.2.4 Reset 改「重置当前所选模式」+ 接口带 mode；§4.2.5 Save 加 mode；§4.3.2 模式切换改为三者均自动更新；§5.2 新增「二次改拍」blockquote + `AiConfigView` 按模式分组 JSON + `PUT config` body 带 mode + 接口表更新（reset 带 `{ mode }`）
+  - **Prisma**：`schema.prisma`（CourseAiConfig 改按模式字段）；前向迁移 `server/prisma/migrations/20261020130000_ai_config_per_mode/migration.sql`（新增 6 列 TEXT 可空 → `UPDATE ... SET lectureSystemPrompt=customSystemPrompt, socraticSystemPrompt=customSystemPrompt, lectureWelcomeMsg=customWelcomeMsg, socraticWelcomeMsg=customWelcomeMsg, lectureModel=llmModel, socraticModel=llmModel` → DROP 三旧列），已 `migrate deploy` 成功
+  - **后端**：`ai-config.service.ts`（`AiConfigView` 改为 `{ courseId, releaseId, releaseTag, isLive, llmProvider, online, hasApiKey, lecture, socratic }`，新增 `AiModeView`；`saveConfig` 按 `dto.mode` 只写该模式三列；`resetConfig(courseId, mode)` 只重置当前模式；`resolvePrompts` 按模式取自定义；`resolveRuntime(courseId, releaseId, mode)` 按模式取模型；`toView` 分组返回）、`dto/save-config.dto.ts`（新增 `mode`、字段改名 `systemPrompt/welcomeMsg`）、`dto/reset-config.dto.ts`（新增，`{ mode }`）、`ai.controller.ts`（reset 带 body mode）、`ai-chat.service.ts`（`resolveRuntime` 传 `dto.mode`）
+  - **前端**：`api/ai.ts`（`AiConfigView` 改为 lecture/socratic 分组；`saveConfig` 带 mode；`resetConfig(courseId, mode)`）、`stores/aiStore.ts`（新增 `buildForm` 按模式取 自定义>模板 + 该模式 model；`setMode` 三者均载入对应模式值；`save` 带 mode；`reset` 带 mode；`selectRelease` 按模式）、`components/ai/ConfigPanel.tsx`（Reset 提示文案改为「当前模式」）
+  - **测试**：`ai-config.service.spec.ts`（新增 saveConfig 按模式、SOCRATIC 只写 socratic、resetConfig 只清当前模式、resolvePrompts 按模式、resolveRuntime 按模式等用例；mock 补 `promptTemplate`）、`ai.e2e-spec.ts`（config/加密/reset/限流/Release 隔离用例改为按模式口径 + 新增「AI 配置按模式隔离：保存/重置只影响当前模式」）
+- **自测证据**：server `npx tsc --noEmit` 0 错；client `npx tsc --noEmit` 0 错；server 单测 **11 suites / 67 tests passed**；server e2e **5 suites / 65 tests passed**；`prisma migrate status` up to date 无 drift（由 Review Agent 复跑确认）。UI 外观/交互由用户手动冒烟
+- **审查结论**：Review Agent（独立新上下文）**APPROVE（0 Blocking）**。Non-blocking 3 条：① 【AI协作日志】缺第五批条目（本条目即补齐）；② `saveConfig` 空串经 `?? null` 仍存 `''`，视图返回 `''` 而非 §5.2 所称 `null`（前端 `||` 回退下行为一致，仅契约语义不严格，建议改 `dto.systemPrompt || null`）；③ `setMode` 会静默丢弃未保存改动（§4.3.2 未要求弹确认）。②③ 待用户裁决
+- **Git**：本地未提交（攒批，等待用户指令再推送）
+- **下一步**：用户手动冒烟（切换 Lecture/Socratic 应分别载入各自 prompt/welcome/model；Save 后仍可切换；Set Live 不影响测试）；②③ 是否修待用户裁决；按用户裁决继续本地攒批不推送
+
+---
+
+## 2026-10-20 ｜ AI Tutor 知识库 Release 选择器 + Set Live + AI 配置改按 Release 维度保存
+
+- **任务**（用户）：AI Tutor 对话头部（Lecture/Socratic 按钮左侧）原**只读显示当前知识库 Release**，改为**可点击的 Release 选择器**（按发布时间**倒序**）；旁边加 **Set Live**（把某 Release 设为**上线版本**）。同时 **AI 配置（知识库 / system prompt / welcome message / LLM model / apiKey）改为按 Release 维度保存**——切换 Release 时加载该 Release 用 Save Configuration 存过的配置。Online 开关保持课程级。
+- **用户裁决**（AskUserQuestion 三轮 8 项 + 徽章澄清）：
+  1. AI 配置保存维度 = **每个 Release 一份**；2. Set Live = **轻量：仅切换 Live 指针**（不重建草稿）；3. 「当前测试所选 Release」= **后端每课程持久化**；4. 新建 Release 的 AI 配置来源 = **模板默认**；
+  5. 切 Release 时有未保存改动 = **提示 保存 / 丢弃**；6. Online 作用域 = **保持课程级**；7. Release 下拉**不含「当前编辑草稿（未发布）」**；8. 徽章：AI Tutor 顶部栏右侧静态 Testing **移除**，改挂 **versionTag 旁**并**动态 Testing/Live**；用户澄清规则：**所选 Release = 上线版本 ⇒ 显示 live**（下拉列表中该版本旁也标 live）；**选择其他版本均为 testing**；**testing 状态点 Set Live ⇒ 该版本变 live、徽章变 live**。
+- **变更清单**（设计文档先行）：
+  - **设计文档**：§2 Course（+`aiTestReleaseId`/`aiTutorOnline`、`aiConfig`→`aiConfigs[]`）/ Release（+`aiConfigs[]`）/ CourseAiConfig（+`releaseId`、去 `courseId @unique`/`online`、`@@unique([courseId,releaseId])`、`onDelete: Cascade`）；§3.1 顶部栏徽章移除；§3.4.4 **新增 Set Live（轻量）**；§4.1 顶部栏移除 Testing、右列改 Release 选择器+Set Live；§4.2.5 按 Release 维度改拍；§4.2.6 online 改 Course 课程级；§4.3.1 对话头部 Release 选择器+Set Live+动态徽章+dirty 弹确认；§4.3.4 对话流程（读 `aiTestReleaseId ?? currentReleaseId`）；§4.4.2 核心处理；§5.1.3 新增 set-live 行；§5.2 新增 active-release 接口 + 按 Release 注记 + 无 Release 边界
+  - **Prisma**：`server/prisma/schema.prisma`；前向迁移 `server/prisma/migrations/20261020120000_ai_config_per_release/migration.sql`（Course 加两列；`UPDATE Course SET aiTutorOnline=cfg.online WHERE online=true`；CourseAiConfig 加 releaseId 先可空→回填=currentReleaseId→删 NULL 行→SET NOT NULL→DROP online→DROP 旧 unique→建复合 unique→加 FK ON DELETE CASCADE），已 `migrate deploy` 成功
+  - **后端**：`ai-config.service.ts`（整体重写，新增 `releaseId/releaseTag/isLive`、`testReleaseIdOf`、`requireReleaseId`、`setActiveRelease`、`setOnline`→Course、`resolvePrompts/resolveRuntime` 带 releaseId、`toView` 等式判 live）、`dto/set-active-release.dto.ts`、`ai.controller.ts`（新增 `PUT config/:courseId/active-release`）、`ai-chat.service.ts`（带 `aiTestReleaseId`→releaseId）、`releases.service.ts`+`controller.ts`（新增轻量 `setLive` + `POST /courses/:id/set-live`）
+  - **前端**：`api/ai.ts`（加 releaseId/releaseTag/isLive + `setActiveRelease`）、`api/knowledge.ts`（加 `setLive`）、`stores/aiStore.ts`（新增 `releases`/`selectRelease`/`setLive`；`selectCourse` 并发拉 config+releases）、`ChatWindow.tsx`（新增 `StateBadge`+`ReleaseSelector`：倒序下拉+Live Tag+当前项高亮、Set Live 按钮、dirty 弹确认）、`AITutor.tsx`（移除顶部栏 TestingBadge）
+  - **测试**：`ai-config.service.spec.ts`（重写，11 用例）、`ai.e2e-spec.ts`（config GET 断言 releaseId/isLive、online 读 Course、新增 active-release + set-live 用例）
+- **自测证据**：server `npx tsc --noEmit` 0 错；client `npx tsc -b --force` 0 错；server 单测 **11 suites / 62 tests passed**；server e2e **5 suites / 63 tests passed**（含修复：限流用例须**先发布 Release 再保存配置**，因配置改按 Release 维度后无 Release 会 400）；`npx prisma migrate status` → **up to date 无 drift**。UI 外观由用户手动冒烟
+- **审查结论**：Review Agent（独立新上下文）**APPROVE（0 Blocking）**。Non-blocking 6 条：① 第四批【AI协作日志】缺失（本条目即补齐）；② `setLive` 未包 `$transaction`，与 §3.4.4 第 3 步「单事务内」措辞不符；③ `set-live` 复用 `ActivateReleaseDto`（无 `@IsUUID`），非法 UUID 走 404 与 active-release 的 400 不一致；④ 「切换 Release 加载对应配置」缺专项隔离测试（A→B→A 回显）；⑤ `aiTestReleaseId`/`currentReleaseId` 为无 FK 标量（沿袭既有模式）；⑥ 预留钩子 501 经全局过滤器映射 `INTERNAL_ERROR`（既有批 3 遗留，建议增 `NOT_IMPLEMENTED` 映射）
+- **审查后续（2026-10-20 用户裁决「全部修复」）**：② `setLive` 改为 `$transaction` 单事务（对齐 §3.4.4）；③ `ActivateReleaseDto` 加 `@IsUUID()`（与 `SetActiveReleaseDto` 口径一致，set-live 非法 UUID → 400）；④ 补 e2e「AI 配置按 Release 维度隔离」（R1 存自定义 → 切 R2 回退默认 → 切回 R1 回显）。⑤⑥ 保留为遗留项。**复核（同一 Review Agent 续审）结论 APPROVE（0 Blocking）**；其指出 `aiStore.ts` / `ChatWindow.tsx` 两处注释仍引用旧编号 → **已同步改为 §4.3.5**。复核证据：server tsc 0 错、单测 62/62、e2e **64/64**、client tsc 0 错
+- **设计偏差上报**：文档重复章节号 **§4.3.4**（第 518 行「对话流程」与 533 行「对话消息格式」冲突）——**2026-10-20 用户裁决修正**：后段「对话消息格式」改编号为 **§4.3.5**（文档无其他引用）
+- **Git**：本地未提交（攒批，等待用户指令再推送）
+- **下一步**：用户手动冒烟（Release 选择器倒序 / 切换加载配置 / Set Live 后徽章变 live / dirty 弹确认）；按用户裁决继续**本地攒批不推送**；⑤⑥ 保留为遗留项
+
+---
+
+## 2026-10-20 ｜ AI Tutor 顶部栏标题与配置卡标题对调（「AI Tutor 配置」→「AI Tutor」）
+
+- **任务**（用户）：将「AI Tutor 配置」改名为「AI Tutor」，并把该名称与当前位于其上方（顶部栏）的 **Course 名对调位置**。
+- **用户裁决**（AskUserQuestion，2 项）：① 对调后 **顶部栏显示「AI Tutor」**、**配置卡标题行显示当前 Course 名**（其后仍保留 Online 开关 + Change Course 下拉）；② 顶部栏静态 **「Testing」徽章保留**。
+- **变更清单**：
+  - **设计文档**（先改后实现）：§4.1 顶部栏标题改为模块名「AI Tutor」、左列卡片标题行左侧改为「当前 Course 名」；新增注记「2026-10-20 顶部栏标题与配置卡标题对调」；§3.1 注记②改为「AI Tutor 顶部栏（模块名）」、③改为「与 Course 名同一行」、**新增⑤对调说明**；§4.2.6 开关位置描述改为「Course 名右侧紧贴处」；§2 schema 注释更新
+  - **`client/src/pages/AITutor.tsx`**：`AITutorTopBar` 标题由「当前 Course 名」改为静态 「AI Tutor」（样式不变：全宽白栏/高 63/底边线/主色 `#145CFF`/16px/600/底部 2px 下划线），保留 `TestingBadge`；移除不再需要的 `courses`/`selectedCourseId` 读取与过期注释
+  - **`client/src/components/ai/ConfigPanel.tsx`**：卡片标题行左侧由「AI Tutor 配置」改为**当前 Course 名**（新增派生 `courseName = courses.find(...)?.title ?? '—'`，span 加 `title` 属性便于截断查看）；同步更新组件头注释与标题行注释
+- **自测证据**：client `npx tsc --noEmit` 0 错、`npm run build`（tsc -b && vite build）**✓ built in 1.26s**（仅既有 chunk 体积告警）。UI 外观由用户手动冒烟
+- **审查结论**：Review Agent（独立新上下文）**APPROVE**（0 Blocking，3 Non-blocking）：① `ConfigPanel` 标题行注释仍写旧文案 → **已按建议修正**；② `AITutor` 页面注释「顶部课程标题栏」措辞过期 → **已修正为「顶部模块标题栏」**；③ 提示 Change Course 下拉始终显示课程名、与左侧 courseName 略重复（系对调前既有模式平移，属用户已确认口径，非缺陷）。评审实测复核：`tsc --noEmit` 0 错、`build` ✓ 1.15s、确认 `courseName` 边界（空列表/未选课回退 `—`）、无未使用导入（noUnusedLocals）、与 §4.1/§3.1/§4.2.6 一致
+- **Git**：本地未提交（攒批，等待用户指令再推送）
+- **下一步**：用户手动冒烟（顶部栏显示「AI Tutor」+ Testing 徽章；配置卡标题行显示当前 Course 名）；待用户确认后再推送
+
+---
+
+## 2026-10-20 ｜ AI Tutor 对话头部控件样式（Lecture/Socratic 胶囊切换 + New Chat 主色主按钮）
+
+- **任务**（用户按上传参考图）：① 将 Lecture / Socratic 模式切换按钮改为图片样式；② 旁边 New Chat 按钮样式同步按图片调整。
+- **参考图规格**：模式切换＝**胶囊型分段控件**（整条主色描边 + 白底 + 全圆角），选中项实心主色底白字、未选中项白底主色字；New Chat＝**主色实心主按钮** + 前置「+」图标 + 白色加粗文字。
+- **变更清单**：
+  - **设计文档**（先改后实现）：§4.3.1 新增注记「2026-10-20 对话头部控件样式调整」（模式切换胶囊样式 + New Chat 主色实心主按钮规格）
+  - **`client/src/index.css`**：`.ai-mode-segmented` 由「仅选中项蓝底」扩展为胶囊型——整体 `1px var(--color-primary)` 描边 + `var(--color-bg-container)` 白底 + `border-radius:999px`；`.ant-segmented-item` 设 `border-radius:999px` / 主色字 / `font-weight:600`；未选中 hover 底 `--color-primary-bg` 且文本保持主色（`!important` 覆盖 AntD 更高特异性的 hover 文本色规则）；选中项实心主色底白字；`.ant-segmented-thumb` 主色 + 圆角 999
+  - **`client/src/components/ai/ChatWindow.tsx`**：New Chat 由 `size="small"` 次级按钮改为 `type="primary"` 主色实心按钮 + `PlusOutlined` 图标 + `fontWeight: tokens.fontWeight.semibold`
+  - **样式复用既有 CSS 变量**（`--color-primary` / `--color-bg-container` / `--color-primary-bg`），未新增硬编码色值
+- **自测证据**：client `npm run build`（tsc -b && vite build）**✓ built in 1.19s**（仅既有 chunk 体积告警）；Grep 确认 `.ai-mode-segmented` 全仓库仅出现在 `index.css` 与 `ChatWindow.tsx`，无回归引用；`onChange`/`onClick={newChat}` 未改动（无行为变更）。UI 外观由用户手动冒烟
+- **审查结论**：Review Agent（独立新上下文）**APPROVE**（0 Blocking，3 Non-blocking + 1 设计偏差上报）：① hover 时未选中项文本会被 AntD 更高特异性 hover 规则压成近黑 → **已按评审建议当场修复**（补 `color: var(--color-primary) !important`）；② 工作区另含上一批 Schema/后端/新组件变更，未纳入本次审查（属既有待合并变更集）；③ index.css 中 `font-weight:600` 与 tokens 重复（既有风格）；**设计偏差上报**：文档存在重复章节号 §4.3.4（第 487 / 502 行，既有问题，非本次引入），建议其一改为 §4.3.5。评审实测复核：client `tsc --noEmit` 0 错、`npm run build` ✓ 1.15s，并核验 CSS 选择器精确命中 AntD 5.29 DOM、样式已入构建产物
+- **Git**：本地未提交（攒批，等待用户指令再推送）
+- **下一步**：用户手动冒烟（胶囊切换按钮静态态与 hover 态 / New Chat 主色主按钮）；待用户确认后再推送
+
+---
+
+## 2026-10-20 ｜ AI Tutor 配置区加宽（40/60）+ Online 开关 + 「管理所有 online」弹窗
+
+- **任务**（用户 3 项要求）：① 加宽左侧 AI Tutor 配置卡片，与右侧 chat 重新分配区域（配置 40% / chat 60%）；② 在「AI Tutor 配置」字样右侧紧贴处增加一个 Switch，开关左侧写 `Online`，作用是控制该配置是否对用户侧开放（预留对应接口）；③ 在 Change Course 下拉面板最下侧增加链接「管理所有 online」，点击弹出表格弹窗——罗列全部 online 与未 online 的 AI Tutor，可按名称 / Online 状态排序、支持按名称搜索。
+- **用户裁决**（AskUserQuestion，4 项）：① Online 状态存储＝**`CourseAiConfig.online`（Boolean，默认 false）**；② 保存方式＝**切换即时生效（新增独立接口）**；③ 管理弹窗＝**表格内每行可切换（点即改即存）**；④「预留对应的接口」＝**仅预留路由 / Service 钩子，不实现业务逻辑**。
+- **变更清单**：
+  - **设计文档**（先改后实现）：§2 `CourseAiConfig` 新增 `online Boolean @default(false)`；§5.2 新增 `PUT /api/ai/config/:courseId/online`、`GET /api/ai/tutors`、`GET /api/user/ai-tutors`（预留钩子）三行，并在 `GET /api/ai/config/:courseId` 行注明含 `online`；§4.1 左右分栏改为 40%/60%（新增改拍注记）；新增 **§4.2.6 Online 开关与管理弹窗**（开关即时生效、管理弹窗列/排序/搜索均前端本地、预留接口口径）
+  - **Prisma**：`server/prisma/schema.prisma` 加 `online Boolean @default(false)`；迁移 `20261020032026_add_course_ai_config_online`（`ALTER TABLE "CourseAiConfig" ADD COLUMN "online" BOOLEAN NOT NULL DEFAULT false;`）已创建并应用
+  - **后端 service** `ai/ai-config.service.ts`：`AiConfigView` 加 `online`；新增 `AiTutorListView`；新增 `setOnline(courseId, online)`（upsert 即时生效）、`listTutors()`（全课程 + online 状态，无记录视为 false）、`listOnlineTutorsForUser()`（**抛 NotImplementedException 501，预留**）；`toView` 返回值加 `online`
+  - **后端 DTO** 新增 `ai/dto/set-online.dto.ts`（`@IsBoolean() online!`）
+  - **后端 controller** `ai/ai.controller.ts`：`AiController` 新增 `PUT config/:courseId/online`、`GET tutors`；文件末尾新增 `@Controller('user')` 的 `UserAiController`（`GET ai-tutors` → 预留钩子）；`ai.module.ts` controllers 加入 `UserAiController`
+  - **前端 api** `client/src/api/ai.ts`：`AiConfigView` 加 `online`；新增 `AiTutorListView`、`aiApi.setOnline`、`aiApi.listTutors`
+  - **前端 store** `client/src/stores/aiStore.ts`：新增 state `tutorManagerOpen` / `tutors` / `tutorsLoading`；新增 action `setOnline`（当前课程即时切换，并同步弹窗行）、`setTutorOnline`（行内切换，若为当前课程回收卡片 `config.online`）、`openTutorManager` / `closeTutorManager`
+  - **前端布局** `client/src/pages/AITutor.tsx`：左列 `flex:'0 0 40%'`、右列 `flex:'1 1 0'`（60%）；挂载 `<TutorManagerModal />`
+  - **前端卡片** `client/src/components/ai/ConfigPanel.tsx`：标题行左「AI Tutor 配置」+ 紧贴的 `Online` 文案 + `Switch`（`checked=config?.online`、即时 `onOnlineChange`）；Change Course `Select` 受控 `open` + `popupRender` 面板底部追加 `Divider` + 「管理所有 online」下划线链接（点击收起下拉并打开弹窗）
+  - **前端新增组件** `client/src/components/ai/TutorManagerModal.tsx`：Modal（标题「管理所有 online」）+ 右上角 `Input.Search`（按名称过滤）+ `Table`（列 `AI Tutor` 按名称 `localeCompare` 排序、列 `Online` 按布尔排序、行内 `Switch` 点即改即存）
+  - **UI 出口** `client/src/components/ui/index.ts`：透传新增 `Switch` / `Divider`
+- **自测证据**：server `npx tsc --noEmit` **EXIT=0**；client `npx tsc --noEmit` **EXIT=0**、`npm run build`（tsc -b && vite build）**✓ built in 1.20s**；server 单测 `npx jest` **11 suites / 56 tests passed**（新增 `ai-config.service.spec.ts` 4 例）；server e2e `npx jest --config ./test/jest-e2e.json` **5 suites / 62 tests passed**（新增 5 例：online 切换即时生效、非布尔 400、tutors 列表、user 侧 501）。UI 由用户手动冒烟
+- **审查结论**：Review Agent（独立新上下文）**APPROVE**（0 Blocking，4 Non-blocking）：① 501 走全局过滤器 default 分支映射为 `INTERNAL_ERROR`（信封格式一致、非阻塞；建议增设 `NOT_IMPLEMENTED` 映射）；② `AITutor.tsx` 中 `#ECFDF3` / `height:63` 沿袭既有硬编码未走 token（极小）；③ 文档 §4.1 措辞「左列保留最小宽度兜底」与实现 `flex:'0 0 40%'` 略有不符 → **已回填文档为「40% 固定占比、不收缩」**；④ `UserAiController` 与 `AiController` 同文件（预留阶段可接受）。评审实测复核：server tsc 0 错、单测 56/56、e2e 62/62、`prisma migrate status` 无 drift；client tsc 0 错、build ✓ 1.31s；并确认 `antd@5.29.3` Select 类型含 `popupRender`、`.env` 未入库
+- **Git**：本地未提交（攒批，等待用户指令再推送）
+- **下一步**：用户手动冒烟（40/60 分栏 / Online 开关即时生效 / 下拉底部「管理所有 online」链接 / 弹窗排序与搜索 / 行内切换并回写卡片开关）；待用户确认后再推送
+
+---
+
+## 2026-10-20 ｜ AI Tutor 布局调整（导航列白底铺满 / Change Course 移入配置卡 / 课程标题栏对齐 Knowledge Tab 栏 / 底栏脱离卡片）
+
+- **任务**（用户 4 项要求）：① 最左侧模块导航列下方露出灰底，整列应统一白底；② course 选择器移到「AI Tutor 配置」右侧同一行；③ 课程标题行按图 1 展示（蓝色加粗下划线）+ 右侧紧贴静态 Testing 徽章；④ Reset / Save Configuration 按图 2 调整位置与样式。
+- **用户裁决**（AskUserQuestion）：① 下拉位置＝**放进「AI Tutor 配置」卡片标题行右侧**（标题左、下拉右，同一行）；② 标题样式＝**主色蓝加粗 + 文字下方蓝色下划线（与图 1 一致）**；③ Testing＝**固定展示的静态徽章（始终显示，纯装饰）**；④ 底栏＝**去掉顶部分隔线**，Reset 左 / Unsaved changes & Save 右（与图 2 一致），Reset 为蓝色下划线文字链接。
+- **根因（①）**：`ModuleNav` 的 `<nav>` 仅按内容高度渲染，其容器 `div` 亦无高度，下方露出 `Layout` 灰底 `#F8FAFC`。
+- **变更清单**：
+  - **设计文档**（先改后实现）：§4.1 页面布局改为「顶部课程标题（主色蓝加粗+下划线）+ 静态 Testing 徽章」「Change Course 移入配置面板卡片标题行右侧」；§4.2.5 底栏说明改为「去掉顶部分隔线、Reset 为蓝色下划线文字链接」；§3.1 新增注记「2026-10-20 模块导航列白底铺满 + AI Tutor 布局调整」（①–④）
+  - **`layout/ModuleNav.tsx`**：`<nav>` 增 `height: '100%'`（白底 `bg.container` 铺满整列）
+  - **`layout/MainLayout.tsx`**：导航列外层宽度容器 `div` 增 `height: '100%'`
+  - **`pages/AITutor.tsx`**（第一轮，第二轮已重写，见下）：移除顶部栏的 `Select`/`selectCourse`/`Typography`；课程标题行改为 `<span>`（`fontSize 20`/`fontWeight bold`/`color primary #1D6BFF`/`paddingBottom 6` + `borderBottom 2px primary`，下划线宽度=文字宽度），右侧紧跟新增本地组件 `TestingBadge`（浅绿底 `#ECFDF3` + 6px 绿点 + 绿字 `success`，圆角 999，静态）
+  - **`ai/ConfigPanel.tsx`**（第一轮，第二轮已重写，见下）：Card `title` 改为标题行节点——左「AI Tutor 配置」（超长省略号）、右 `Change Course` `Select`（`size="small"`、`flexShrink:0`、`minWidth 150`，值/回调接自 store `courses/selectedCourseId/selectCourse`）；底部操作栏移除 `borderTop`，`Reset` 改为 `Button type="link"` 内嵌 `textDecoration: underline` span，`Space` 间距改 `spacing.lg`
+- **自测证据**：前端 `npx tsc -b --noEmit` **TSC_EXIT=0**（0 错误）；`npx vite build` **✓ built in 1.37s**（仅既有 chunk 体积告警）。UI 外观按项目约束由用户手动冒烟
+- **审查结论**：Review Agent（独立新上下文）**APPROVE**（0 Blocking，3 Non-blocking）：① `server/e2e_out.txt` 为未跟踪调试产物，建议清理/加 `.gitignore`（本次范围外）；② Card head-title 默认 `nowrap/overflow:hidden`，超长课程名可能挤压下拉——**已当场采纳修复**（标题 span 加 ellipsis、Select 加 `flexShrink:0`）；③ 协作日志未回填——**本次已补录**。评审实测复核：client `tsc -b --noEmit` EXIT=0；`lint` 0 errors（4 warnings 均在既有文件）
+- **Git**：本地未提交（攒批，等待用户指令再推送）
+- **第二轮（同日追加裁决）**：用户要求 ③ 课程标题行的**展示方式与 Knowledge 顶部 Tab 栏（Knowledge Pages / Releases）保持一致**；④ 底部操作栏**脱离配置卡片**、置于卡片下方（卡片下边界上移至 LLM Model 功能区下方、不再包裹操作栏，纵向下移卡片、操作栏位置不变）；并同意清理 `server/e2e_out.txt` 调试残留。
+- **第二轮变更清单**：
+  - **设计文档**：§3.1 注记 ②/④ 与 §4.1/§4.2.5 改写为上述口径
+  - **`pages/AITutor.tsx`**：新增导出组件 `AITutorTopBar`——与 `KnowledgeTabBar` 同规格（高 63 / 内边距 `0 24` / 白底 `bg.container` / 底边线 1px `border`；标题 `fontSize['2xl']`(16) / `semibold`(600) / `primaryDark #145CFF` + 绝对定位 2px 下划线，宽度=文字宽度）；右侧静态 `TestingBadge`（浅绿底 `#ECFDF3` + 绿点 + 绿字）。页面主体仅 `[配置面板 | 对话窗口]`，根节点改 `height:'100%'`（新增 63px topBar 后原 `calc(100vh - 140px)` 不再适用）
+  - **`App.tsx`**：`ai-tutor` 模块经 `topBar` 注入 `<AITutorTopBar />`
+  - **`ai/ConfigPanel.tsx`**：根节点改 flex 列（`height:100%`）——Card `flex:1/minHeight:0`（下边界止于 LLM Model 下方），**操作栏移出卡片**为下方独立区块（`flexShrink:0`，`padding 0 4px`）
+  - **清理 `server/e2e_out.txt`**（`git ls-files` 无记录、未被任何 npm script 引用，用户同意）
+- **第二轮自测**：client `npx tsc -b --noEmit` **TSC_EXIT=0**；`npx vite build` **✓ built in 1.03s**
+- **第二轮审查结论**：Review Agent（独立新上下文）**APPROVE**（0 Blocking，3 Non-blocking）：① 本日志条目停留在第一轮实现 → **已按最终实现重写本条**；② 340px 列下 dirty 态操作栏三点偏挤，冒烟时留意换行（较原先置于卡片内更宽松，属改善）；③ `TestingBadge` 背景 `#ECFDF3` 硬编码未走 token（极小）。评审逐值比对 `KnowledgeTabBar.tsx` 确认高度 / 内边距 / 底边线 / 颜色 / 字号 / 字重 / 下划线**全部一致**
+- **下一步**：用户手动冒烟（最左列白底 / 配置卡标题行下拉 / AI Tutor 顶栏与 Knowledge Tab 栏一致 / Testing 徽章 / 底栏脱离卡片且 Reset 为下划线链接）
+
+---
+
 ## 2026-10-19 ｜ 内容面板样式统一（Knowledge Pages / Releases / AI Tutor 三区对齐 Figma）
 
 - **任务**：用户要求结合 Figma 设计缓存（`figma/tools/design-cache/YL-KS+AI_UIIFinal-20261019-105235`）中的「1 knowledge」与「2 Ai tutor 配置」，将 Knowledge 与 AI Tutor 的**页面内容框格式统一**，**不增删内容，仅做内容框外观设计**。

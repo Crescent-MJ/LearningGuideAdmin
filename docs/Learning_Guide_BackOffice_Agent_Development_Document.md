@@ -53,6 +53,9 @@
 > **2026-10-16 结构扁平化改拍**：原三级 Course→Lesson→Page 简化为两级 Course→Page。
 > Lesson（文件夹）层删除：原 Lesson 标题变为 Page.title（md 文件标题），原 Lesson 下属各 Page 的内容合并为该 Page 的 contentMd，以 `# {原Page标题}` 作为 H1 section 拼接。
 > Page 新增 `sectionTags`（Json）：按 heading（H1-H6，2026-10-19 由 H1/H2/H3 扩展）slug 映射用户自定义 tags，用于 AI 投喂时的语义标注。
+>
+> **2026-10-20 AI 配置改按 Release 维度改拍**（用户裁决）：`CourseAiConfig` 由「每课程一份」（`courseId @unique`）改为**每个 Release 一份**（`@@unique([courseId, releaseId])`；无配置行时按模板默认值运行，新建 Release 不继承）。
+> 同时：① 课程级 Online 开关由 `CourseAiConfig.online` **搬到 `Course.aiTutorOnline`**（online 保持课程级语义）；② `Course` 新增 `aiTestReleaseId`——后台 AI Tutor **测试所选 Release**（null 时回退 `currentReleaseId`）。用户侧 AI Tutor 仍只读 `currentReleaseId`（上线版本）；③ `Course` 新增 `editingReleaseId`（2026-10-20 二次改拍）——**当前编辑版本指针**，历史弹窗 `editing` 标识来源，由「Create Release」与「切换到此版本」写入。
 
 ```prisma
 // ==========================================
@@ -73,13 +76,19 @@ model Course {
   description     String?
   externalId      String?   // 对应外部同步源的 ID
   structureJson   Json?     // 存储树形目录的原始结构，用于快速渲染
-  currentReleaseId String?  // 激活版本指针（§3.4.3/§4.3.3）：AI Tutor 知识库读此 Release 快照
+  currentReleaseId String?  // 上线版本指针（§3.4.3/§4.3.3）：用户侧 AI Tutor 读此 Release 快照
+  // 后台「测试所选 Release」（2026-10-20 新增）：AI Tutor 后台测试对话读此 Release 快照；null 时回退 currentReleaseId
+  aiTestReleaseId  String?
+  // 当前编辑版本指针（2026-10-20 二次改拍，普通标量列，不建外键）：新建 Release 或「切换到此版本」后指向该 Release
+  editingReleaseId String?
+  // 课程级 Online 开关（2026-10-20 由 CourseAiConfig.online 搬移而来）：该课程 AI Tutor 是否对用户侧开放
+  aiTutorOnline   Boolean   @default(false)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
   pages           Page[]
   releases        Release[]
-  aiConfig        CourseAiConfig?
+  aiConfigs       CourseAiConfig[]   // 每个 Release 各一份 AI 配置（2026-10-20 由一对一改为按 Release 一对多）
   // 反向关联（Prisma 双向关系要求）：users 为隐式多对多，
   // migrate 时生成联接表 _CourseToUser
   users           User[]
@@ -126,6 +135,9 @@ model Release {
   snapshotData    Json      // 完整内容快照: { pages: [{ id, title, contentMd, sectionTags }] }（2026-10-16 扁平化；去 tags）
   createdAt       DateTime  @default(now())
 
+  // 反向关联：该 Release 对应的 AI 配置（2026-10-20 按 Release 一份）
+  aiConfigs       CourseAiConfig[]
+
   @@index([courseId, createdAt])
 }
 
@@ -148,11 +160,14 @@ model PromptTemplate {
   socraticConfigs CourseAiConfig[] @relation("SocraticTemplate")
 }
 
-// 课程专属的 AI 配置
+// 课程 + 发布版本 专属的 AI 配置（2026-10-20 改拍：由「每课程一份」→「每个 Release 一份」）
+// 2026-10-20 二次改拍（用户裁决）：System Prompt / Welcome Message / LLM Model 三者在各自维度上**再按模式（Lecture / Socratic）分别保存**
 model CourseAiConfig {
   id                  String    @id @default(uuid())
-  courseId            String    @unique
+  courseId            String
   course              Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  releaseId           String
+  release             Release   @relation(fields: [releaseId], references: [id], onDelete: Cascade)
 
   // 引用基础模板
   lectureModeId       String?
@@ -160,19 +175,27 @@ model CourseAiConfig {
   lectureTemplate     PromptTemplate? @relation("LectureTemplate", fields: [lectureModeId], references: [id])
   socraticTemplate    PromptTemplate? @relation("SocraticTemplate", fields: [socraticModeId], references: [id])
 
-  // 覆盖自定义的提示词（可选，优先级高于模板）
-  customSystemPrompt  String? @db.Text
-  customWelcomeMsg    String? @db.Text
+  // 覆盖自定义的提示词（按模式分开，可选；有值即优先于该模式模板）
+  // 2026-10-20 由单一 customSystemPrompt / customWelcomeMsg 拆分而来（存量值迁移时两模式同时回填）
+  lectureSystemPrompt   String? @db.Text
+  socraticSystemPrompt  String? @db.Text
+  lectureWelcomeMsg     String? @db.Text
+  socraticWelcomeMsg    String? @db.Text
 
-  // LLM 配置
-  llmProvider         String    // 如: "openai", "deepseek", "claude"
-  llmModel            String    // 如: "gpt-4o", "gpt-3.5-turbo"
+  // LLM 配置（llmProvider / llmBaseUrl / apiKey 课程级共享；model 按模式，null 时回退 AI_AVAILABLE_MODELS[0]）
+  llmProvider         String    // 如: "openrouter"
+  lectureModel        String?
+  socraticModel       String?
   llmBaseUrl          String?   // 可选的自定义 Base URL
   apiKey              String?   // 加密存储
 
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
+
+  // 每个 Release 至多一份配置（2026-10-20 改拍；原 `courseId @unique` 已移除）
+  @@unique([courseId, releaseId])
 }
+// 注：课程级 Online 开关已移至 Course.aiTutorOnline（2026-10-20）；System Prompt / Welcome / Model 按模式分开（2026-10-20）；无该 Release 的配置行时按模板默认值运行。
 
 // AI 对话记录（后台调试用）
 model AiChatSession {
@@ -225,6 +248,13 @@ Knowledge System 是系统的主界面，采用「顶部整宽 Tab 栏 + 下方�
 > **Phase 4 排版对齐注记（2026-10-14，按用户设计稿）**：整体为「顶部 Header + 模块导航列 + 课程树列 + 内容区」四段——Header 白底，左侧 logo+产品名、右侧通知铃铛与当前用户（演示身份静态占位）；模块导航列含 **Knowledge / AI Tutor** 两个入口（当前模块高亮）；树列顶部搜索框、底部 Sync 按钮；预设标签配色：Core Knowledge 蓝 / Teaching Guidance 绿 / Misconception 橙 / Assessment 紫。
 
 > **2026-10-19 模块导航列可收起**（用户裁决，完全收起隐藏；形态更新为**半圆括号式贴边把手**）：最左侧模块导航列（Knowledge / AI Tutor）新增收起/展开按钮——按钮为**半圆括号式贴边把手**（外侧整边圆弧、内侧平直，约 22×48），紧贴该列**右边缘垂直居中**（不跨边界）；点击后整列向左滑出隐藏（宽 160 → 0，带 0.2s 过渡），把手随停靠到最左边缘作为展开入口；方向符号用文本 **❮ / ❯**（fontSize 16 / fontWeight 700，加粗放大，随状态切换）。收起状态由 `MainLayout` 本地 state 维护，不改动 `ModuleNav` 组件本身。
+
+> **2026-10-20 模块导航列白底铺满 + AI Tutor 布局调整**（用户裁决，对齐 Figma 图 1/图 2）：
+> ① **模块导航列整列白底**：最左侧模块导航列（Knowledge / AI Tutor）背景统一为白色 `#FFFFFF` 并**铺满至该列底部**（此前 `<nav>` 仅按内容高度渲染，下方露出布局灰底 `#F8FAFC`）；实现为 `ModuleNav` 根节点与 `MainLayout` 导航列容器高度补 100%。
+> ② **AI Tutor 顶部栏**：**展示方式与 Knowledge 顶部 Tab 栏（Knowledge Pages / Releases）保持一致**——全宽白色栏、高 63px、内边距 `0 24px`、底部 1px 分隔线；标题文字为模块名 **「AI Tutor」**（主色 `#145CFF`、字号 16px、字重 600、底部 2px 下划线，宽度 = 文字宽度）。经 `MainLayout` 的 `topBar` 槽位注入，位于导航列右侧、内容区上方。（原右侧静态 "Testing" 徽章于 **2026-10-20 按用户裁决移除**，Testing/Live 徽章改挂对话头部 versionTag 右侧，见 §4.3.1）
+> ③ **Change Course 下拉移入配置面板**：由 AI Tutor 顶部栏移入**左侧配置面板卡片标题行右侧**，与 Course 名同一行。
+> ④ **配置面板底部操作栏**：**脱离配置卡片**，改为卡片**下方**独立区块（卡片下边界上移至 LLM Model 功能区下方、不再包裹操作栏）；操作栏纵向位置不变（仍在左列底部）；去掉顶部分隔线，`Reset` 为**蓝色下划线文字链接**（左），`Unsaved changes` + `Save Configuration` 靠右。
+> ⑤ **顶部栏标题与配置卡标题对调**（2026-10-20 追加）：顶部栏标题由「当前 Course 名」改为**模块名「AI Tutor」**；配置面板卡片标题行左侧由「AI Tutor 配置」改为**当前 Course 名**（Online 开关仍紧贴其右侧）。
 
 ### 3.2 左侧边栏（Sidebar）
 
@@ -362,25 +392,33 @@ Knowledge System 是系统的主界面，采用「顶部整宽 Tab 栏 + 下方�
 | 列名 | 说明 |
 |------|------|
 | Course Name | 课程名称 |
-| Revision Notes | **激活版本**的备注（2026-10-15 随激活模型改拍，原「最近一次发布的备注」；若无则显示 "No revision notes provided"） |
-| Latest Release | **激活版本**版本号（`Course.currentReleaseId` 指向的 Release），格式 `CourseName_YYYYMMDDHHmm`，可点击（2026-10-19 由 "Current Version" 更名） |
+| Revision Notes | **最新发布快照**的备注（2026-10-20 随「纯快照」改拍：原「激活版本备注」；若无则显示 "No revision notes provided"） |
+| Latest Release | **最新发布的快照版本号**（`createdAt` 最新者），格式 `CourseName_YYYYMMDDHHmm`，可点击进入历史（2026-10-19 由 "Current Version" 更名；2026-10-20 由「激活版本」改为「最新快照版本」，Live 状态在历史弹窗内展示） |
 | Action | Create Release 按钮（2026-10-19 由 "Publish" 更名） |
 
 #### 3.4.2 Latest Release 交互
 
 > **设计改拍（2026-10-15，用户裁决）**：原「只读查看、无回滚」改为**激活版本模型**——历史版本可浏览、可切换为激活版本。
+> **设计改拍（2026-10-20，用户裁决）**：Create Release 改为**纯快照、不改 Live 指针**（§3.4.3）；历史弹窗新增删除 ×；Live 状态标识由「激活中」改为 **live**。
+> **设计改拍（2026-10-20 二次，用户裁决）**：**「切换到此版本」语义收窄为「仅恢复快照到可编辑草稿」**——**不再改动 `Course.currentReleaseId`（Live 指针）**；**Live 指针只能由 AI Tutor 板块的 §3.4.4「Set Live」变更**。按钮**对所有版本（含 Live）显示**；`Course.aiTestReleaseId` 对应标识由「测试所选」改文案为 **`testing`**。
+> **设计改拍（2026-10-20 三次，用户裁决）**：**`editing` 标识下移到版本行**——移除 Modal 标题行的课程名与 `editing` 标签（标题仅「历史版本」）；`editing` 改为**紧贴版本名右侧**，标识**当前编辑版本**（`Course.editingReleaseId`）；**该版本行不显示「切换到此版本」按钮**（已处于编辑态，禁止再切换）。
 
-- 点击版本号，弹出 Dropdown/Modal 展示该 Course 的历史版本列表
-- 每个历史版本显示：版本号、发布时间、Revision Notes；**当前激活版本带「激活中」标识**
-- 每个非激活的历史版本提供「切换到此版本」按钮（§12 事项 #5 拍板）：
-  1. 二次确认弹窗：明确提示「切换将以该版本内容**覆盖当前可编辑草稿**（含未发布的修改），且 AI Tutor 知识库立即变为该版本」，用户确认后才执行
+- 点击版本号，弹出 Modal（标题「历史版本」）展示该 Course 的历史版本列表
+- **Modal 标题**（2026-10-20 三次改拍）：仅显示「历史版本」；**移除**课程名与 `editing` 标签
+- **`editing` 判定**（2026-10-20 三次改拍，`Course.editingReleaseId`）：**新建 Release 后落在该新版本**（§3.4.3）；**点击「切换到此版本」后落在被切换的版本**（本文步骤 3）。二者均写入 `Course.editingReleaseId`；`Set Live`（§3.4.4）不改变它；删除该版本时指针一并清空（§3.4.5）
+- 每个已发布版本显示：版本号、发布时间、Revision Notes；状态标签（2026-10-20 三次改拍定序）：**`editing`**（该版本为 `Course.editingReleaseId`，**紧贴版本名右侧**）、**`live`**（该版本为 `Course.currentReleaseId`）、**`testing`**（该版本为 `Course.aiTestReleaseId`）
+- **每个已发布版本行尾提供删除 ×**（2026-10-20 新增，§3.4.5）：点击后二次确认删除；**若该版本为 Live 版本，或为 AI Tutor 后台「测试所选 Release」（`Course.aiTestReleaseId`），则禁止删除、隐藏或置灰该 ×**，后端同样返回 409 保护
+- **「切换到此版本」按钮**（2026-10-20 二次/三次改拍）：**所有版本（含 Live）显示**，**但 `editing` 版本不显示**：
+  1. 二次确认弹窗：明确提示「切换将以该版本内容**覆盖当前可编辑草稿**（含未发布的修改）」，**不再提 AI Tutor**；用户确认后才执行
   2. 前端调用 `POST /api/courses/:id/activate-release`，传入 `{ releaseId }`
-  3. 后端在**单事务**内：校验 releaseId 属于该 Course → 更新 `Course.currentReleaseId` → 用该 Release 的 snapshotData **重建 Page 草稿**（快照中仅含发布时刻的 SYNCED 节点，重建节点一律 `syncState=SYNCED`，后续 Sync 按标题匹配不受影响）
+  3. 后端在**单事务**内：校验 releaseId 属于该 Course → 用该 Release 的 snapshotData **重建 Page 草稿**（快照中仅含发布时刻的 SYNCED 节点，重建节点一律 `syncState=SYNCED`，后续 Sync 按标题匹配不受影响）→ **置 `Course.editingReleaseId` = 该 Release**；**不更新 `Course.currentReleaseId`**
   4. 前端刷新课程树与编辑器（当前草稿指向的页面可能已不存在，需清空选中态）
 
 #### 3.4.3 Create Release 流程
 
-> **设计改拍（2026-10-15）**：Create Release 语义 = 创建快照 + **激活**（发布即激活）；快照仅收录 `syncState=SYNCED` 的节点（延续 §3.2.2「STALE 不作 AI 知识库」）。
+> **设计改拍（2026-10-15）**：Create Release 语义 = 创建快照 + **激活**（发布即激活）。
+> **设计改拍（2026-10-20，用户裁决）**：Create Release 语义改为 **纯快照**——**仅创建快照，不改动 `Course.currentReleaseId`（Live 指针）**，因此**不影响 AI Tutor 的上线版本**；也不改动 `Course.aiTestReleaseId`（后台测试所选 Release，需用户在 AI Tutor 头部手动选择）。快照仅收录 `syncState=SYNCED` 的节点（延续 §3.2.2「STALE 不作 AI 知识库」）。
+> **设计改拍（2026-10-20 三次，用户裁决）**：新建 Release 后，**置 `Course.editingReleaseId` = 该新 Release**（`editing` 标识落在新版本，§3.4.2）。
 
 1. 用户点击某个 Course 的 "Create Release" 按钮
 2. 弹出 Modal，要求填写 Revision Notes（必填）
@@ -390,11 +428,41 @@ Knowledge System 是系统的主界面，采用「顶部整宽 Tab 栏 + 下方�
    - 生成版本号：`CourseTitle_YYYYMMDDHHmm`
    - 将所有当前内容聚合为 JSON 快照：`{ pages: [{ id, title, contentMd, sectionTags }] }`
    - 写入 Release 表
-   - 更新 `Course.currentReleaseId` = 新 Release（发布即激活）
+   - **置 `Course.editingReleaseId` = 该新 Release**（当前编辑版本指针；`editing` 标识来源，§3.4.2）
+   - **不更新 `Course.currentReleaseId`**（纯快照；**Live 指针只能由 AI Tutor 板块的 §3.4.4「Set Live」变更**）
 5. 前端刷新 Releases 列表
 
 > **重要**：Create Release 动作是发布整个 Course 下所有页面的快照，不是单个 Page。
 > **2026-10-16 扁平化**：快照结构从 `{ lessons: [...] }` 改为 `{ pages: [...] }`，activate 时直接重建 Page（不再经过 Lesson）。
+> **2026-10-20 纯快照改拍影响**：首次发布后 `currentReleaseId` 仍为空，用户侧 AI Tutor 无上线版本；后台测试需在 AI Tutor 头部 Release 选择器手动选择该版本（会写入 `Course.aiTestReleaseId`）。
+
+#### 3.4.4 Set Live（设为上线版本，轻量；2026-10-20 新增）
+
+> **设计改拍（2026-10-20，用户裁决）**：**`Course.currentReleaseId`（Live 指针）只能由 AI Tutor 板块的 Set Live 变更**——Knowledge 板块不再提供任何改变 Live 的入口。
+> - §3.4.2「切换到此版本」（`activate-release`）：**仅恢复快照到可编辑草稿**（覆盖式，有破坏性，需二次确认），**不动 Live 指针**。
+> - §3.4.4「Set Live」：**轻量**，**仅切换上线指针**（`Course.currentReleaseId`），**不重建、不覆盖当前可编辑草稿**。
+
+1. 用户在 AI Tutor 对话头部点击 **Set Live**（针对「当前测试所选 Release」，§4.3.1）
+2. 前端调用 `POST /api/courses/:id/set-live`，传入 `{ releaseId }`
+3. 后端在单事务内：校验 releaseId 属于该 Course → 更新 `Course.currentReleaseId` = 该 Release → 返回 `{ id, versionTag }`
+4. **不触碰 Page 草稿**（与 `activate-release` 的关键区别）
+5. 前端对话头部左徽章由 `Testing` 切为 `Live`
+
+#### 3.4.5 删除版本（Delete Release；2026-10-20 新增）
+
+> **设计改拍（2026-10-20，用户裁决）**：Releases 历史版本支持删除。**双保护**——Live 版本与 AI Tutor 后台「测试所选 Release」均不可删除。
+
+1. 用户在历史弹窗点击某版本的删除 ×
+2. 二次确认弹窗：提示「将永久删除该版本快照，不可撤销」，用户确认后才执行
+3. 前端调用 `DELETE /api/releases/:releaseId`
+4. 后端校验：
+   - Release 不存在 → 404
+   - Release 为所属 Course 的 Live 版本（`Course.currentReleaseId`）→ 409 `CONFLICT`「上线版本不可删除」
+   - Release 为所属 Course 的 AI Tutor 后台测试所选版本（`Course.aiTestReleaseId`）→ 409 `CONFLICT`「后台测试所选版本不可删除」
+   - 其余 → 单事务内删除该 Release（其关联 `CourseAiConfig` 行经 `onDelete: Cascade` 一并删除）；**若被删除的版本恰为 `Course.editingReleaseId`，同事务将该指针清空（置 null）**
+5. 前端刷新 Releases 列表（历史弹窗）
+
+> **注**：删除仅移除该快照与对应 AI 配置，**不改动** `Course.currentReleaseId` / `Course.aiTestReleaseId` / Page 草稿（因双保护已排除这两类版本）。**当前编辑版本（`editingReleaseId`）不属于双保护，允许删除；删除后该指针清空**（§3.4.2 `editing` 标识随之消失）。
 
 ---
 
@@ -404,10 +472,13 @@ Knowledge System 是系统的主界面，采用「顶部整宽 Tab 栏 + 下方�
 
 AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库来源于 Knowledge System 中选中的 Course。
 
-页面布局（2026-10-15 改版对齐设计稿）：
-- **顶部栏（全宽）**：左侧显示当前课程标题，右侧 "Change Course" 下拉选择器
-- **左侧**：配置面板（System Prompt、Welcome Message、LLM Model、Reset/Save 按钮）
-- **右侧**：测试对话窗口（头部显示激活版本号 + Testing 徽章、模式切换、New Chat、消息列表、输入框）
+页面布局（2026-10-15 改版对齐设计稿；2026-10-20 按 Figma 图 1/图 2 调整）：
+- **顶部栏（全宽）**：**展示方式与 Knowledge 顶部 Tab 栏一致**——白色栏、高 63px、底部 1px 分隔线；标题为模块名 **「AI Tutor」**（主色 `#145CFF`、16px、字重 600、底部 2px 下划线，宽度=文字宽度）。（原右侧静态 "Testing" 徽章于 2026-10-20 按用户裁决**移除**；Testing/Live 徽章改挂在对话头部 versionTag 右侧，§4.3.1）
+- **左侧（占 40%）**：配置面板卡片（System Prompt、Welcome Message、LLM Model）——卡片标题行由左到右为**当前 Course 名** →（紧贴）"Online" 文字 + Switch（§4.2.6）→ 最右 "Change Course" 下拉选择器（下拉面板最下侧固定「管理所有 online」链接）；**卡片的 Reset / Save 操作栏脱离卡片，位于卡片下方**（左列底部，纵向位置不变）
+- **右侧（占 60%）**：测试对话窗口（头部左侧为**知识库 Release 选择器 + Set Live**、中间模式切换、右侧 New Chat、消息列表、输入框）
+
+> **2026-10-20 左右分栏比例改拍**（用户裁决）：AI Tutor 页面左右两栏由固定宽度改为按比例分配——左「配置」列 **40%**（`flex: 0 0 40%`，固定占比、不收缩）、右「对话」列 **60%**（`flex: 1 1 0`，占满剩余）。
+> **2026-10-20 顶部栏标题与配置卡标题对调**（用户裁决）：顶部栏标题显示模块名「AI Tutor」；配置面板卡片标题行左侧显示**当前 Course 名**（原「AI Tutor 配置」文案弃用）。
 
 ### 4.2 左侧配置面板
 
@@ -415,42 +486,69 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 - 文本域（Textarea，较大行数），支持编辑当前课程使用的 AI 人设
 - 编辑后需点击 "Save" 才能持久化
+- **按模式分开保存（2026-10-20 二次改拍，用户裁决）**：Lecture 与 Socratic 各自的 System Prompt **独立存一份**；切换模式时输入框载入该模式的自定义值（无则用该模式模板默认值）
 
 #### 4.2.2 Welcome Message
 
 - 文本域（Textarea），支持编辑欢迎语
+- **按模式分开保存（2026-10-20 二次改拍）**：同 System Prompt，Lecture / Socratic 各自独立一份
 
 #### 4.2.3 LLM Model 配置
 
 - 下拉框，切换模型（数据源为 `AI_AVAILABLE_MODELS` env，逗号分隔）
 - 后端需提供模型列表接口（`GET /api/ai/models`），支持扩展
 - **默认模型**：取 `AI_AVAILABLE_MODELS` 列表第一个；当前为 `deepseek/deepseek-v4.1-flash`
-- **用途**：所选模型即该课程 AI Tutor 对话使用的模型（含测试与学生端），保存后对该课程生效
+- **按模式分开（2026-10-20 二次改拍）**：Lecture / Socratic 各自一个模型；切换模式时同步切换；该模式未设置时回退默认模型（`AI_AVAILABLE_MODELS[0]`）
+- **用途**：所选模型即该（课程 × 模式）AI Tutor 对话使用的模型（含测试与学生端），保存后对该模式生效
 - **API Key**：统一使用服务端全局 `OPENROUTER_API_KEY`，课程级 API Key 覆盖已下线（2026-10-15）；后端 `CourseAiConfig.apiKey` 字段及加密逻辑保留，仅前端不再暴露入口
 
 #### 4.2.4 Reset 按钮
 
-- 点击后，清空当前课程的自定义输入
-- 恢复为对应模式的默认 PromptTemplate（从 PromptTemplate 表加载 isDefault=true 的记录）
+- 点击后，清空**当前所选模式**的自定义输入（只重置 Lecture / Socratic 中当前这一个）
+- System Prompt / Welcome Message 恢复为**该模式**的默认 PromptTemplate（PromptTemplate 表 load isDefault=true 的记录）；LLM Model 回退默认模型
+- 接口带 `mode`：`POST /api/ai/config/:courseId/reset`（body `{ mode }`；§5.2）
 
 #### 4.2.5 Save 按钮
 
-- 保存当前修改到 CourseAiConfig 表
-- 包括：lectureModeId、socraticModeId、customSystemPrompt、customWelcomeMsg、llmProvider、llmModel 等
-- 配置面板底部左侧为 Reset 链接，中间显示 "Unsaved changes" 未保存提示，右侧为 "Save Configuration" 蓝色主按钮
+- 保存当前修改到 CourseAiConfig 表（**2026-10-20 改按 Release 维度**：保存到「当前测试所选 Release」对应的那份配置，见 §4.3.1/§3.4.4；**2026-10-20 二次改拍：再按模式**——只写**当前所选模式**那一份）
+- 包括：`mode` + lectureModeId/socraticModeId + 该模式的三项值（System Prompt、Welcome Message、Model）+ 共享的 llmProvider 等
+- 配置面板底部操作栏（**2026-10-20 脱离配置卡片，位于卡片下方、左列底部**）：无顶部分隔线；左侧为**蓝色下划线文字链接 "Reset"**；右侧依次为橙色 "Unsaved changes" 未保存提示与蓝色主按钮 "Save Configuration"
+- **未保存改动提醒**：切换模式 / 切换课程 / 切换 Release 前，若存在未保存改动则弹二次确认（保存 / 取消；§4.3.6）
+
+> **2026-10-20 配置按 Release 维度改拍**（用户裁决）：AI 配置（知识库 / system prompt / welcome message / LLM model）**随 Release 保存**——每个 Release 各有一份 `CourseAiConfig`（`@@unique([courseId, releaseId])`）；切换 Release 时，左侧面板加载该 Release 已保存的配置（system prompt / welcome message / LLM model 按该次 Save 的状态回显；无配置行时按 PromptTemplate 默认值）；Save Configuration 写入该 Release 的那份配置。新建 Release 不继承上一版本的配置（按模板默认起步）。
+
+> **2026-10-20 二次改拍：AI 配置再按模式维度**（用户裁决，修复「保存后切换 Lecture/Socratic 不再更新」问题）：System Prompt / Welcome Message / LLM Model 三者**均按 Lecture / Socratic 分别保存**——切换模式时左侧面板载入**该模式**的已保存值（无自定义则模板默认值），Save Configuration 只写**当前模式**那一份；Reset 亦只重置当前模式。存量单份自定义值迁移时**同时回填到两个模式**（现状不失，用户可后续分开调整）。
+
+#### 4.2.6 Online 开关与管理弹窗（2026-10-20 新增）
+
+- **Online 开关**：位于配置卡片标题行 Course 名右侧紧贴处，开关**左侧**为文字 "Online"；语义为「**该课程**的 AI Tutor 是否对用户侧开放」（课程级开关，与 Release 无关；后台测试对话不受影响，仍可正常调试）。
+  - **切换即时生效**：`PUT /api/ai/config/:courseId/online`（body `{ online: boolean }`），返回最新 `AiConfigView`；**无需点击 Save Configuration**。
+  - **存储**：`Course.aiTutorOnline`（§2，默认 false；2026-10-20 由 `CourseAiConfig.online` 搬移而来，保持课程级语义）。
+- **「管理所有 online」入口**：位于 "Change Course" 下拉面板**最下侧固定一行链接**；点击后关闭下拉并打开管理弹窗。
+- **管理弹窗**：表格展示全部 AI Tutor（Course），列 = `AI Tutor 名称` / `Online 状态`；支持**按名称排序、按 Online 状态排序**（点列头切换升降序）；**右上角搜索框按名称过滤**。排序与过滤均在**前端本地**完成（数据源 `GET /api/ai/tutors`，数据量为课程量级）。每行提供开关，**点即改即存**（同上接口）；当改动的正是当前选中课程时，同步更新左侧卡片标题行的 Online 开关。
+- **预留接口**：`GET /api/user/ai-tutors`（用户侧读取 Online AI Tutor 列表）本次**仅预留路由与 Service 方法**（不实现业务逻辑），供后续学生端接入（§5.2）。
 
 ### 4.3 右侧对话面板
 
 #### 4.3.1 对话头部
 
-- 左侧：当前课程激活版本号（`Course.currentReleaseId` 指向的 Release.versionTag）+ 绿色 "Testing" 徽章（固定显示，表示 AI 测试用知识库版本）
-- 中间：Lecture / Socratic 模式切换
-- 右侧：+ New Chat 按钮
+- 左侧：**知识库 Release 选择器**（2026-10-20 新增）——显示「当前测试所选 Release」的 versionTag（蓝色、可点击），其右侧为**动态徽章**（所选 Release ≠ 上线版本时显示 `Testing`；所选 Release = 上线版本时显示 `Live`，均为浅绿底绿字）；再右侧为 **Set Live** 主色按钮。
+  - 点击 versionTag 展开下拉：按发布时间**倒序**列出该 Course 全部 Release，**上线版本行**显示绿色 `Live` 徽章、当前所选项高亮；点某行 = 切换 AI Tutor 测试所用 Release（**持久化到后端 `Course.aiTestReleaseId`**）。
+  - **Set Live**：仅把 `Course.currentReleaseId` 指向所选 Release，**不重建/覆盖 Page 草稿**（§3.4.4）；成功后左徽章由 `Testing` 切为 `Live`。
+  - 切换 Release 时若 AI 配置有未保存改动：**弹未保存改动提醒**（保存 / 取消；§4.3.6）。
+- 中间：Lecture / Socratic 模式切换（**胶囊型分段控件**，样式见下方注记）
+- 右侧：+ New Chat 按钮（**主色实心主按钮**，样式见下方注记）
+
+> **2026-10-20 对话头部控件样式调整**（用户裁决，按参考图）：
+> - **模式切换**（§4.3.2）由 `Segmented` 默认灰底样式改为**胶囊型分段控件**——整体 1px 主色 `#1D6BFF` 描边 + 白底 + 全圆角（`999`）；**选中项实心主色底 + 白字 + 字重 600**，**未选中项白底 + 主色字 + 字重 600**。
+> - **New Chat**（§4.3.3）由默认次级按钮改为**主色实心主按钮**（`type="primary"`：底色 `#1D6BFF`、圆角 8px、白色加粗文字）+ 前置 `+` 图标。
 
 #### 4.3.2 模式切换
 
 - Segmented 切换 `Lecture` 和 `Socratic` 模式
-- **关键逻辑**：切换模式时，左侧的 System Prompt 输入框应自动更新为对应模式的提示词（优先使用自定义配置，无自定义则使用模板默认值）
+- **切换前若有未保存改动**：弹未保存改动提醒（保存 / 取消；§4.3.6）——保存则先写当前模式再切换，取消则丢弃改动后切换
+- **关键逻辑**：切换模式时，左侧的 **System Prompt / Welcome Message / LLM Model 三者均自动更新为对应模式的值**（优先使用**该模式**的自定义配置，无自定义则使用该模式模板默认值；§4.2.1–§4.2.3）
+  - **2026-10-20 二次改拍**：自定义配置本身已按模式分开存储，故切换模式时总能载入对应模式的独立值（修复此前「保存后切换模式不再更新」的问题）
 
 #### 4.3.3 New Chat
 
@@ -467,14 +565,14 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
    - message（用户输入）
    - mode（当前模式：lecture 或 socratic）
 3. 后端执行以下逻辑：
-   - 知识库上下文来源（**2026-10-15 拍板改**）：读取 `Course.currentReleaseId` 指向的激活 Release 的 snapshotData 聚合课程资料，**不再读实时草稿**——创建 Release 后未再次发布的编辑不影响 AI；若课程从未发布（currentReleaseId 为空），返回错误提示「该课程尚未发布知识库版本，请先在 Knowledge 模块 Releases 页创建版本」（2026-10-19 文案随 Tab 更名更新）
+   - 知识库上下文来源（**2026-10-15 拍板改；2026-10-20 按 Release 维度更新**）：后台测试对话读取 **`Course.aiTestReleaseId` 指向的「测试所选 Release」**（为空时回退 `Course.currentReleaseId`）的 snapshotData 聚合课程资料，**不再读实时草稿**——创建 Release 后未再次发布的编辑不影响 AI；用户侧 AI Tutor 仍只读 `Course.currentReleaseId`（上线版本）。若课程从未发布（两个指针均为空），返回错误提示「该课程尚未发布知识库版本，请先在 Knowledge 模块 Releases 页创建版本」（2026-10-19 文案随 Tab 更名更新）
    - 组装 Prompt：`System Prompt + [CONTEXT: 课程资料] + 用户消息`
    - 调用 LLM API（流式）
    - 将流式响应转发给前端
    - 对话不落库（2026-10-14 拍板，见 §4.3.2）
 4. 前端以流式（SSE 或 fetch stream）方式逐块渲染 AI 回复
 
-#### 4.3.4 对话消息格式
+#### 4.3.5 对话消息格式
 
 每条消息包含：
 
@@ -483,6 +581,16 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 | role | string | "user" 或 "ai" |
 | content | string | 消息内容（Markdown 格式） |
 | createdAt | string | ISO 8601 时间戳 |
+
+#### 4.3.6 未保存改动提醒（Unsaved Changes Guard；2026-10-20 新增）
+
+> **设计改拍（2026-10-20，用户裁决）**：左侧配置面板的 System Prompt / Welcome Message / LLM Model（含当前模式的改动）若有**未保存**内容，在执行**会丢弃这些改动**的操作前，必须弹**二次确认**，避免用户误丢编辑。
+
+- **判定**：当前 `form`（System Prompt / Welcome Message / LLM Model）与 `initialForm`（上次载入/保存后的基线）不一致 → 视为「有未保存改动」（与操作栏 "Unsaved changes" 提示同口径，§4.2.5）。
+- **触发场景**（本次范围）：`切换 Lecture/Socratic 模式`（§4.3.2）、`切换课程 Change Course`（§4.2.1）、`切换 Release 版本`（§4.3.1）。（New Chat 不触发。）
+- **提醒方式**：弹窗，提示「当前配置有未保存改动」，两个按钮：
+  - **保存**：先执行与 Save Configuration 完全一致的操作（`PUT /api/ai/config` 写当前模式，§4.2.5）；**保存成功后**再执行用户原本的操作；若保存失败（如未选 Release、后端校验错误）则**中止**原操作并提示错误。
+  - **取消**：**不保存**，直接丢弃改动并执行用户原本的操作。
 
 ### 4.4 AI Gateway Proxy（后端安全核心）
 
@@ -508,8 +616,8 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 #### 4.4.2 核心处理逻辑
 
 1. **参数校验**：验证 courseId、message、mode 必填
-2. **加载配置**：根据 courseId 获取 CourseAiConfig，解析 LLM 提供商和模型（apiKey 字段经 AES-256-GCM 解密后仅在内存中使用，环境变量 `AI_CONFIG_ENCRYPTION_KEY`，2026-10-14 拍板）
-3. **加载知识库上下文**：读取 `Course.currentReleaseId` 指向的激活 Release 的 `snapshotData.pages`，按 H1-H6 section 切分 contentMd，每段拼接对应 `sectionTags`（如有），聚合为带语义标注的课程资料
+2. **加载配置**：根据 courseId + 测试所选 Release 获取对应的 CourseAiConfig（2026-10-20 按 Release 维度），解析 LLM 提供商和模型（apiKey 字段经 AES-256-GCM 解密后仅在内存中使用，环境变量 `AI_CONFIG_ENCRYPTION_KEY`，2026-10-14 拍板）
+3. **加载知识库上下文**：读取 **`Course.aiTestReleaseId`（为空回退 `currentReleaseId`）** 指向 Release 的 `snapshotData.pages`，按 H1-H6 section 切分 contentMd，每段拼接对应 `sectionTags`（如有），聚合为带语义标注的课程资料
 4. **组装 Prompt**：
    - 获取对应模式的 PromptTemplate（优先自定义，其次默认）
    - 拼接：`System Prompt` + `[CONTEXT_START]` + 课程资料 + `[CONTEXT_END]` + 用户消息
@@ -560,10 +668,12 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /api/courses/:id/release | 发布 Course 快照并**激活**（需 revisionNotes；快照仅含 SYNCED 节点；2026-10-15 改） |
-| GET | /api/courses/:id/releases | 获取 Course 的所有 Release 历史（含 `isActive` 标识，2026-10-15 加） |
+| POST | /api/courses/:id/release | **纯快照**：创建 Course 快照（需 revisionNotes；快照仅含 SYNCED 节点）；**置 `Course.editingReleaseId` = 该新版本**；**不改动 `currentReleaseId`/`aiTestReleaseId`**（2026-10-20 由「发布即激活」改拍，§3.4.3） |
+| GET | /api/courses/:id/releases | 获取 Course 的所有 Release 历史（含 `isActive`=是否 Live、`isTestSelected`=是否后台测试所选、`isEditing`=是否当前编辑版本，2026-10-20 加；2026-10-15 加 isActive） |
 | GET | /api/releases/:releaseId | 获取某个 Release 的快照详情 |
-| POST | /api/courses/:id/activate-release | 切换激活版本：`{ releaseId }`；事务内更新 currentReleaseId 并以该快照重建草稿树（2026-10-15 新增，§3.4.2） |
+| DELETE | /api/releases/:releaseId | **删除版本**（2026-10-20 新增，§3.4.5）：Live 版本或后台测试所选版本返回 409 `CONFLICT`；级联删除其 AI 配置；**若为当前编辑版本则清空 `Course.editingReleaseId`** |
+| POST | /api/courses/:id/activate-release | **恢复历史快照到可编辑草稿**：`{ releaseId }`；事务内以该快照重建 Page 草稿树，**置 `Course.editingReleaseId` = 该版本**，**不改 `currentReleaseId`**（2026-10-20 二次/三次改拍，§3.4.2） |
+| POST | /api/courses/:id/set-live | **设为上线版本（轻量）**：`{ releaseId }`；仅更新 `Course.currentReleaseId`，**不重建/覆盖 Page 草稿**（2026-10-20 新增，§3.4.4；与 activate-release 的区别） |
 
 #### 5.1.4 同步接口
 
@@ -592,15 +702,54 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 ### 5.2 AI 相关接口
 
+> **2026-10-20 按 Release 维度改拍**：AI 配置（§4.2.5）与「测试所选 Release」均按 Release 组织。`GET/PUT config` 与 `reset` 默认作用于该 Course 的**测试所选 Release**（后端解析：`Course.aiTestReleaseId` ?? `Course.currentReleaseId`）；`AiConfigView` 返回 `releaseId` / `releaseTag` / `isLive`（测试所选 Release 是否为上线版本）/ `online`（Course 级）。学生端仍只读上线版本。
+
+> **2026-10-20 二次改拍：AI 配置再按模式维度**（用户裁决，修复「保存后切换 Lecture/Socratic 不再更新」）：System Prompt / Welcome Message / LLM Model 三者按模式分开存储。`AiConfigView` 改为返回**按模式分组**的视图（见下）；`PUT config` 与 `reset` 均需携带 `mode`，只作用于**该模式**那一份。
+
+`AiConfigView`（`GET config` / `PUT config` / `reset` / `active-release` / `online` 的返回）：
+```json
+{
+  "courseId": "string",
+  "releaseId": "string | null",
+  "releaseTag": "string | null",
+  "isLive": false,
+  "online": false,
+  "llmProvider": "openrouter",
+  "hasApiKey": false,
+  "lecture":  { "systemPrompt": "string | null", "welcomeMsg": "string | null", "model": "string" },
+  "socratic": { "systemPrompt": "string | null", "welcomeMsg": "string | null", "model": "string" }
+}
+```
+> `lecture/socratic` 下的 `systemPrompt` / `welcomeMsg` 为**自定义覆盖值**（null = 未自定义，前端回退该模式模板默认值）；`model` 为**该模式生效模型**（自定义 ?? `AI_AVAILABLE_MODELS[0]`）。
+
+`PUT /api/ai/config` 请求体（**新增 `mode`，只写该模式**）：
+```json
+{
+  "courseId": "string",
+  "mode": "LECTURE | SOCRATIC",
+  "llmProvider": "openrouter",
+  "systemPrompt": "string | null",
+  "welcomeMsg": "string | null",
+  "llmModel": "string",
+  "apiKey": "string?  // 省略=不变，空串=清除"
+}
+```
+
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | /api/ai/chat-stream | 流式 AI 对话（SSE 响应） |
+| POST | /api/ai/chat-stream | 流式 AI 对话（SSE 响应）；后端按该 Course 的**测试所选 Release** 解析知识库快照 |
 | GET | /api/ai/models | 获取可用的 LLM 模型列表（数据源 `AI_AVAILABLE_MODELS` env） |
 | GET | /api/ai/prompts | 获取 PromptTemplate 列表 |
-| PUT | /api/ai/config | 保存 CourseAiConfig |
-| GET | /api/ai/config/:courseId | 获取某 Course 的 AI 配置（apiKey 脱敏，绝不返回明文；含 currentReleaseTag 激活版本号用于对话头部展示） |
-| POST | /api/ai/config/:courseId/reset | 重置为默认配置 |
+| PUT | /api/ai/config | 保存某（课程 × 测试所选 Release × **模式**）的 AI 配置（body 含 `mode`，只写该模式的三项值 + 共享 llmProvider/llmBaseUrl/apiKey） |
+| GET | /api/ai/config/:courseId | 获取某 Course 的 AI 配置（apiKey 脱敏，绝不返回明文；含 `releaseId`/`releaseTag`/`isLive` 用于对话头部展示；含 `online` 用户侧开放状态；System Prompt / Welcome / Model **按模式分组**返回，见上方 `AiConfigView`） |
+| POST | /api/ai/config/:courseId/reset | 重置测试所选 Release 的**当前模式**（body `{ mode }`）配置为默认 |
+| PUT | /api/ai/config/:courseId/active-release | **设置测试所选 Release**：body `{ releaseId }` → 持久化 `Course.aiTestReleaseId`，返回最新 `AiConfigView`（2026-10-20 新增，§4.3.1） |
+| PUT | /api/ai/config/:courseId/online | 设置某 Course 的 Online 状态（开关即时生效，body `{ online: boolean }`，返回最新 AiConfigView；写 `Course.aiTutorOnline`；§4.2.6） |
+| GET | /api/ai/tutors | 列出全部 AI Tutor（Course）及名称 / Online 状态（读 `Course.aiTutorOnline`，供「管理所有 online」弹窗，§4.2.6） |
+| GET | /api/user/ai-tutors | **预留钩子**（用户侧读取 Online AI Tutor 列表；2026-10-20 拍板：仅预留路由与 Service 方法、不实现业务逻辑） |
 
+> **边界**：Course 尚无任何 Release 时，`GET config` 返回模板默认值（`releaseId`/`releaseTag` 为 null、`isLive=false`）；此时 `PUT config`/`reset` 返回 400（无 Release 可绑定），前端提示「请先创建 Release」。
+>
 > 对话记录接口（GET/POST/DELETE `/api/ai/sessions`）不实现（2026-10-14 拍板：对话不落库，见 §4.3.2），待长期持久化启用后再补。
 
 ### 5.3 统一响应格式

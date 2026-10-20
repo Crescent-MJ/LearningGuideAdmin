@@ -29,14 +29,21 @@ model Course {
   description   String?
   externalId    String? // 对应外部同步源的 ID
   structureJson Json? // 存储树形目录的原始结构，用于快速渲染
-  // 激活版本指针：AI Tutor 知识库读此 Release 快照；普通标量列，不建 Prisma 外键关系
+  // 上线版本指针（§3.4.3/§4.3.3）：用户侧 AI Tutor 读此 Release 快照；普通标量列，不建 Prisma 外键关系
   currentReleaseId String?
+  // 后台「测试所选 Release」（2026-10-20 新增）：AI Tutor 后台测试对话读此 Release 快照；null 时回退 currentReleaseId
+  aiTestReleaseId String?
+  // 当前编辑版本指针（2026-10-20 二次改拍）：新建 Release 或「切换到此版本」后指向该 Release；历史弹窗 editing 标识来源；普通标量列，不建 Prisma 外键关系
+  editingReleaseId String?
+  // 课程级 Online 开关（2026-10-20 由 CourseAiConfig.online 搬移而来）：该课程 AI Tutor 是否对用户侧开放
+  aiTutorOnline Boolean @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   pages    Page[]
   releases Release[]
-  aiConfig CourseAiConfig?
+  // 每个 Release 各一份 AI 配置（2026-10-20 由一对一改为按 Release 一对多）
+  aiConfigs CourseAiConfig[]
   // 反向关联：users 为隐式多对多，migrate 时生成联接表 _CourseToUser
   users          User[]
   aiChatSessions AiChatSession[]
@@ -82,6 +89,9 @@ model Release {
   snapshotData  Json // 完整内容快照: { pages: [{ id, title, contentMd, sectionTags }] }（2026-10-16 扁平化；去 tags）
   createdAt     DateTime @default(now())
 
+  // 反向关联：该 Release 对应的 AI 配置（2026-10-20 按 Release 一份）
+  aiConfigs CourseAiConfig[]
+
   @@index([courseId, createdAt])
 }
 
@@ -106,11 +116,13 @@ model PromptTemplate {
   socraticConfigs CourseAiConfig[] @relation("SocraticTemplate")
 }
 
-// 课程专属的 AI 配置
+// 课程 + 发布版本 专属的 AI 配置（2026-10-20 改拍：由「每课程一份」→「每个 Release 一份」）
 model CourseAiConfig {
   id       String @id @default(uuid())
-  courseId String @unique
+  courseId String
   course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  releaseId String
+  release   Release @relation(fields: [releaseId], references: [id], onDelete: Cascade)
 
   // 引用基础模板（两条关系分别命名以消歧）
   lectureModeId    String?
@@ -118,19 +130,27 @@ model CourseAiConfig {
   lectureTemplate  PromptTemplate? @relation("LectureTemplate", fields: [lectureModeId], references: [id])
   socraticTemplate PromptTemplate? @relation("SocraticTemplate", fields: [socraticModeId], references: [id])
 
-  // 覆盖自定义的提示词（可选，优先级高于模板）
-  customSystemPrompt String? @db.Text
-  customWelcomeMsg   String? @db.Text
+  // 覆盖自定义的提示词（按模式分开，可选；有值即优先于该模式模板）
+  // 2026-10-20 由单一 customSystemPrompt / customWelcomeMsg 拆分而来（存量值迁移时两模式同时回填）
+  lectureSystemPrompt  String? @db.Text
+  socraticSystemPrompt String? @db.Text
+  lectureWelcomeMsg    String? @db.Text
+  socraticWelcomeMsg   String? @db.Text
 
-  // LLM 配置
-  llmProvider String // 如: "openai", "deepseek", "claude"
-  llmModel    String // 如: "gpt-4o", "gpt-3.5-turbo"
-  llmBaseUrl  String? // 可选的自定义 Base URL
-  apiKey      String? // 加密存储
+  // LLM 配置（llmProvider / llmBaseUrl / apiKey 课程级共享；model 按模式，null 回退 AI_AVAILABLE_MODELS[0]）
+  llmProvider  String // 如: "openrouter"
+  lectureModel String?
+  socraticModel String?
+  llmBaseUrl   String? // 可选的自定义 Base URL
+  apiKey       String? // 加密存储
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // 每个 Release 至多一份配置（2026-10-20 改拍；原 `courseId @unique` 已移除）
+  @@unique([courseId, releaseId])
 }
+// 注：课程级 Online 开关已移至 Course.aiTutorOnline（2026-10-20）；无该 Release 的配置行时按模板默认值运行。
 
 // AI 对话记录（后台调试用）
 model AiChatSession {

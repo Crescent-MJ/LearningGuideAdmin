@@ -43,6 +43,7 @@ export function MainLayout({
           <div
             style={{
               width: navCollapsed ? 0 : NAV_WIDTH,
+              height: '100%',
               overflow: 'hidden',
               transition: 'width 0.2s ease',
             }}

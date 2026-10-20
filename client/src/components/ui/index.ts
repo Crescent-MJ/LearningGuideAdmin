@@ -50,7 +50,7 @@ export { Layout, Sider, Header, Content, Footer } from './Layout'
 export type { LayoutProps, SiderProps } from './Layout'
 
 // ===== 透传组件（暂不需要 token 默认值覆盖，直接从 antd 导出） =====
-export { Alert, Spin, Tooltip, Dropdown, Popconfirm, Popover, Empty, Space, Upload, App, AutoComplete } from 'antd'
+export { Alert, Spin, Tooltip, Dropdown, Popconfirm, Popover, Empty, Space, Upload, App, AutoComplete, Switch, Divider } from 'antd'
 
 // ===== 类型透传 =====
 export type { MenuProps, UploadProps, UploadFile } from 'antd'

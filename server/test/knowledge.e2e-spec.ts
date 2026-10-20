@@ -222,13 +222,35 @@ describe('Knowledge API (e2e)', () => {
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
   });
 
-  it('GET /api/courses/:id/releases 历史列表不含 snapshotData，激活版本标注 isActive', async () => {
+  it('GET /api/courses/:id/releases 历史列表不含 snapshotData；纯快照发布后 isActive/isTestSelected 均为 false、isEditing=true（§3.4.3）', async () => {
     const res = await request(app.getHttpServer())
       .get(`/api/courses/${courseId}/releases`)
       .expect(200);
     expect(res.body.data).toHaveLength(1);
     expect(res.body.data[0].snapshotData).toBeUndefined();
-    expect(res.body.data[0].isActive).toBe(true);
+    // 纯快照：Create Release 不改动 Live 指针（2026-10-20 改拍）
+    expect(res.body.data[0].isActive).toBe(false);
+    expect(res.body.data[0].isTestSelected).toBe(false);
+    // 新建 Release 落在新版本 → editing（2026-10-20 三次改拍）
+    expect(res.body.data[0].isEditing).toBe(true);
+  });
+
+  it('POST /api/courses/:id/set-live 设为上线版本后 isActive=true（§3.4.4）', async () => {
+    await request(app.getHttpServer())
+      .post(`/api/courses/${courseId}/set-live`)
+      .send({ releaseId })
+      .expect(201);
+    const res = await request(app.getHttpServer())
+      .get(`/api/courses/${courseId}/releases`)
+      .expect(200);
+    expect(res.body.data.find((r: { id: string }) => r.id === releaseId).isActive).toBe(true);
+  });
+
+  it('DELETE /api/releases/:releaseId Live 版本应 409 CONFLICT（§3.4.5 双保护）', async () => {
+    const res = await request(app.getHttpServer())
+      .delete(`/api/releases/${releaseId}`)
+      .expect(409);
+    expect(res.body.error.code).toBe('CONFLICT');
   });
 
   it('GET /api/releases/:releaseId 快照详情', async () => {
@@ -239,7 +261,7 @@ describe('Knowledge API (e2e)', () => {
     expect(res.body.data.snapshotData.pages).toBeDefined();
   });
 
-  it('POST /api/courses/:id/activate-release 切换历史版本并重建草稿（§3.4.2）', async () => {
+  it('POST /api/courses/:id/activate-release 仅恢复快照到草稿，不改 Live 指针、置 editing（§3.4.2 二次/三次改拍）', async () => {
     await request(app.getHttpServer())
       .put(`/api/pages/${pageId}`)
       .send({ contentMd: '# v2 草稿内容' })
@@ -248,7 +270,15 @@ describe('Knowledge API (e2e)', () => {
       .post(`/api/courses/${courseId}/release`)
       .send({ revisionNotes: 'e2e 二发' })
       .expect(201);
+    const v2Id = v2.body.data.id as string;
 
+    // 先把 Live 指向 v2（set-live），以确保后续能验证 activate 未改动 Live 指针
+    await request(app.getHttpServer())
+      .post(`/api/courses/${courseId}/set-live`)
+      .send({ releaseId: v2Id })
+      .expect(201);
+
+    // 切换到此版本（releaseId 快照）→ 仅重建草稿
     const act = await request(app.getHttpServer())
       .post(`/api/courses/${courseId}/activate-release`)
       .send({ releaseId })
@@ -264,13 +294,15 @@ describe('Knowledge API (e2e)', () => {
     expect(pages[0].syncState).toBe('SYNCED');
     pageId = pages[0].id as string;
 
+    // Live 指针未被 activate 改动：仍指向 v2；releaseId 非 Live
     const list = await request(app.getHttpServer())
       .get(`/api/courses/${courseId}/releases`)
       .expect(200);
-    expect(list.body.data.find((r: { id: string }) => r.id === releaseId).isActive).toBe(true);
-    expect(
-      list.body.data.find((r: { id: string }) => r.id === v2.body.data.id).isActive,
-    ).toBe(false);
+    expect(list.body.data.find((r: { id: string }) => r.id === v2Id).isActive).toBe(true);
+    expect(list.body.data.find((r: { id: string }) => r.id === releaseId).isActive).toBe(false);
+    // 「切换到此版本」后 editing 落在被切换的版本（2026-10-20 三次改拍）
+    expect(list.body.data.find((r: { id: string }) => r.id === releaseId).isEditing).toBe(true);
+    expect(list.body.data.find((r: { id: string }) => r.id === v2Id).isEditing).toBe(false);
   });
 
   it('POST /api/courses/:id/activate-release releaseId 不属于该课程应 404', async () => {
@@ -279,6 +311,70 @@ describe('Knowledge API (e2e)', () => {
       .send({ releaseId: '00000000-0000-0000-0000-000000000000' })
       .expect(404);
     expect(res.body.error.code).toBe('NOT_FOUND');
+  });
+
+  it('DELETE /api/releases/:releaseId 后台测试所选版本应 409 CONFLICT（§3.4.5 双保护）', async () => {
+    // 再发布一个快照并设为「后台测试所选」（非上线）→ 删除应被 409 拦截
+    const r3 = await request(app.getHttpServer())
+      .post(`/api/courses/${courseId}/release`)
+      .send({ revisionNotes: 'e2e 三发（测试所选）' })
+      .expect(201);
+    const r3Id = r3.body.data.id as string;
+    await request(app.getHttpServer())
+      .put(`/api/ai/config/${courseId}/active-release`)
+      .send({ releaseId: r3Id })
+      .expect(200);
+    const res = await request(app.getHttpServer())
+      .delete(`/api/releases/${r3Id}`)
+      .expect(409);
+    expect(res.body.error.code).toBe('CONFLICT');
+  });
+
+  it('DELETE /api/releases/:releaseId 普通版本正常删除（§3.4.5）', async () => {
+    const list = await request(app.getHttpServer())
+      .get(`/api/courses/${courseId}/releases`)
+      .expect(200);
+    // 取一个既非 Live、也非测试所选的版本删除
+    const normal = list.body.data.find(
+      (r: { isActive: boolean; isTestSelected: boolean }) => !r.isActive && !r.isTestSelected,
+    );
+    expect(normal).toBeTruthy();
+    await request(app.getHttpServer())
+      .delete(`/api/releases/${normal.id}`)
+      .expect(200);
+    const after = await request(app.getHttpServer())
+      .get(`/api/courses/${courseId}/releases`)
+      .expect(200);
+    expect(after.body.data.find((r: { id: string }) => r.id === normal.id)).toBeUndefined();
+  });
+
+  it('DELETE /api/releases/:releaseId 删除当前编辑版本时清空 editing 指针（§3.4.5 三次改拍）', async () => {
+    const created = await request(app.getHttpServer())
+      .post(`/api/courses/${courseId}/release`)
+      .send({ revisionNotes: 'e2e 四发（编辑版本）' })
+      .expect(201);
+    const editingId = created.body.data.id as string;
+
+    let list = await request(app.getHttpServer())
+      .get(`/api/courses/${courseId}/releases`)
+      .expect(200);
+    expect(
+      list.body.data.find((r: { id: string }) => r.id === editingId).isEditing,
+    ).toBe(true);
+
+    // 该版本非 Live、非测试所选 → 允许删除
+    await request(app.getHttpServer())
+      .delete(`/api/releases/${editingId}`)
+      .expect(200);
+
+    list = await request(app.getHttpServer())
+      .get(`/api/courses/${courseId}/releases`)
+      .expect(200);
+    expect(
+      list.body.data.find((r: { id: string }) => r.id === editingId),
+    ).toBeUndefined();
+    // editing 指针已清空：无任何版本带 isEditing=true
+    expect(list.body.data.some((r: { isEditing: boolean }) => r.isEditing)).toBe(false);
   });
 
   it('DELETE /api/courses/:id 存在 Release 应 409 CONFLICT（删除保护）', async () => {

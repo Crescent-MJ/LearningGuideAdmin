@@ -1,27 +1,61 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+  NotImplementedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CourseAiConfig, PromptTemplate } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from './crypto.service';
 import { SaveAiConfigDto } from './dto/save-config.dto';
 
+/** 单模式的 AI 配置视图（2026-10-20 二次改拍：System Prompt / Welcome / Model 按模式分开） */
+export interface AiModeView {
+  /** 自定义覆盖值（null = 未自定义，前端回退该模式模板默认值） */
+  systemPrompt: string | null;
+  welcomeMsg: string | null;
+  /** 该模式生效模型（自定义 ?? AI_AVAILABLE_MODELS[0]） */
+  model: string;
+}
+
 /** 对外的 AI 配置视图：apiKey 永不明文返回（§2 红线），只暴露是否已配置 */
 export interface AiConfigView {
   courseId: string;
+  /** 「测试所选 Release」id（Course.aiTestReleaseId ?? currentReleaseId；§5.2，2026-10-20） */
+  releaseId: string | null;
+  /** 「测试所选 Release」的 versionTag（§4.3.1 对话头部展示） */
+  releaseTag: string | null;
+  /** 测试所选 Release 是否为上线版本（决定头部徽章 Testing / Live，§4.3.1） */
+  isLive: boolean;
   llmProvider: string;
-  llmModel: string;
-  customSystemPrompt: string | null;
-  customWelcomeMsg: string | null;
-  lectureTemplateId: string | null;
-  socraticTemplateId: string | null;
+  /** 是否对用户侧开放（课程级，§4.2.6；2026-10-20 由 CourseAiConfig.online 搬到 Course.aiTutorOnline） */
+  online: boolean;
   hasApiKey: boolean;
-  /** 当前课程激活版本的 versionTag（§4.3.1 对话头部展示） */
-  currentReleaseTag: string | null;
+  /** Lecture 模式的配置（§4.2.1–§4.2.3） */
+  lecture: AiModeView;
+  /** Socratic 模式的配置 */
+  socratic: AiModeView;
+}
+
+/** 「管理所有 online」弹窗的行视图（§4.2.6） */
+export interface AiTutorListView {
+  courseId: string;
+  title: string;
+  online: boolean;
 }
 
 export interface ResolvedPrompts {
   systemPrompt: string;
   welcomeMsg: string;
+}
+
+/** 课程级关键字段（用于解析「测试所选 Release」与 Online 状态） */
+interface CourseRef {
+  id: string;
+  currentReleaseId: string | null;
+  aiTestReleaseId: string | null;
+  aiTutorOnline: boolean;
 }
 
 @Injectable()
@@ -52,20 +86,28 @@ export class AiConfigService {
     });
   }
 
-  /** §5.2：获取某 Course 的 AI 配置（无记录时返回默认视图） */
+  /** §5.2：获取某 Course 的 AI 配置（作用于「测试所选 Release」；无配置行时返回默认视图） */
   async getConfig(courseId: string): Promise<AiConfigView> {
     const course = await this.ensureCourse(courseId);
-    const cfg = await this.prisma.courseAiConfig.findUnique({
-      where: { courseId },
-    });
-    return await this.toView(courseId, cfg, course.currentReleaseId);
+    const releaseId = this.testReleaseIdOf(course);
+    const cfg = releaseId
+      ? await this.prisma.courseAiConfig.findUnique({
+          where: { courseId_releaseId: { courseId, releaseId } },
+        })
+      : null;
+    return await this.toView(course, cfg, releaseId);
   }
 
-  /** §4.2.5：保存配置（apiKey 加密入库；省略=不变、空串=清除） */
+  /**
+   * §4.2.5（2026-10-20 二次改拍）：保存配置到「测试所选 Release」那一份的**当前模式**。
+   * 只写该模式的 System Prompt / Welcome Message / Model 三列；llmProvider / apiKey 课程共享。
+   * apiKey 加密入库（省略=不变、空串=清除）。
+   */
   async saveConfig(dto: SaveAiConfigDto): Promise<AiConfigView> {
     const course = await this.ensureCourse(dto.courseId);
+    const releaseId = this.requireReleaseId(course);
     const existing = await this.prisma.courseAiConfig.findUnique({
-      where: { courseId: dto.courseId },
+      where: { courseId_releaseId: { courseId: dto.courseId, releaseId } },
     });
 
     let apiKeyField = existing?.apiKey ?? null;
@@ -73,52 +115,162 @@ export class AiConfigService {
       apiKeyField = dto.apiKey === '' ? null : this.crypto.encrypt(dto.apiKey);
     }
 
+    // 只写当前模式那一组三列（另一模式的值保持不变）
+    const modeFields =
+      dto.mode === 'LECTURE'
+        ? {
+            lectureSystemPrompt: dto.systemPrompt || null,
+            lectureWelcomeMsg: dto.welcomeMsg || null,
+            lectureModel: dto.llmModel,
+          }
+        : {
+            socraticSystemPrompt: dto.systemPrompt || null,
+            socraticWelcomeMsg: dto.welcomeMsg || null,
+            socraticModel: dto.llmModel,
+          };
+
     const data = {
       llmProvider: dto.llmProvider,
-      llmModel: dto.llmModel,
-      customSystemPrompt: dto.customSystemPrompt ?? null,
-      customWelcomeMsg: dto.customWelcomeMsg ?? null,
       apiKey: apiKeyField,
+      ...modeFields,
     };
     const cfg = await this.prisma.courseAiConfig.upsert({
-      where: { courseId: dto.courseId },
-      create: { courseId: dto.courseId, ...data },
+      where: { courseId_releaseId: { courseId: dto.courseId, releaseId } },
+      create: { courseId: dto.courseId, releaseId, ...data },
       update: data,
     });
-    return await this.toView(dto.courseId, cfg, course.currentReleaseId);
+    return await this.toView(course, cfg, releaseId);
   }
 
-  /** §4.2.4：重置 = 清除自定义覆盖，恢复默认模板 */
-  async resetConfig(courseId: string): Promise<AiConfigView> {
+  /**
+   * §4.2.4（2026-10-20 二次改拍）：重置 = 清除「测试所选 Release」中**当前模式**的自定义覆盖，
+   * 恢复该模式默认模板（System Prompt / Welcome 清空回退模板，Model 回退默认模型）；另一模式不受影响。
+   */
+  async resetConfig(
+    courseId: string,
+    mode: 'LECTURE' | 'SOCRATIC',
+  ): Promise<AiConfigView> {
     const course = await this.ensureCourse(courseId);
+    const releaseId = this.requireReleaseId(course);
+    const modeFields =
+      mode === 'LECTURE'
+        ? {
+            lectureSystemPrompt: null,
+            lectureWelcomeMsg: null,
+            lectureModel: null,
+            lectureModeId: null,
+          }
+        : {
+            socraticSystemPrompt: null,
+            socraticWelcomeMsg: null,
+            socraticModel: null,
+            socraticModeId: null,
+          };
     const cfg = await this.prisma.courseAiConfig.upsert({
-      where: { courseId },
+      where: { courseId_releaseId: { courseId, releaseId } },
       create: {
         courseId,
+        releaseId,
         llmProvider: 'openrouter',
-        llmModel: this.defaultModel(),
+        ...modeFields,
       },
-      update: {
-        customSystemPrompt: null,
-        customWelcomeMsg: null,
-        lectureModeId: null,
-        socraticModeId: null,
+      update: modeFields,
+    });
+    return await this.toView(course, cfg, releaseId);
+  }
+
+  /**
+   * §5.2（2026-10-20 新增）：设置「测试所选 Release」（后台 AI Tutor 测试对话读此 Release 快照）。
+   * 持久化到 Course.aiTestReleaseId；返回最新视图。
+   */
+  async setActiveRelease(
+    courseId: string,
+    releaseId: string,
+  ): Promise<AiConfigView> {
+    const course = await this.ensureCourse(courseId);
+    const release = await this.prisma.release.findUnique({
+      where: { id: releaseId },
+      select: { id: true, courseId: true },
+    });
+    if (!release || release.courseId !== courseId) {
+      throw new NotFoundException('发布版本不存在或不属于该课程');
+    }
+    const updated = await this.prisma.course.update({
+      where: { id: courseId },
+      data: { aiTestReleaseId: releaseId },
+      select: {
+        id: true,
+        currentReleaseId: true,
+        aiTestReleaseId: true,
+        aiTutorOnline: true,
       },
     });
-    return await this.toView(courseId, cfg, course.currentReleaseId);
+    const cfg = await this.prisma.courseAiConfig.findUnique({
+      where: { courseId_releaseId: { courseId, releaseId } },
+    });
+    return await this.toView(updated, cfg, releaseId);
+  }
+
+  /**
+   * §4.2.6：设置某 Course 的 Online 状态（课程级，与 Release 无关；开关即时生效）。
+   * 写 Course.aiTutorOnline（2026-10-20 由 CourseAiConfig.online 搬移而来）。
+   */
+  async setOnline(courseId: string, online: boolean): Promise<AiConfigView> {
+    const course = await this.ensureCourse(courseId);
+    const updated = await this.prisma.course.update({
+      where: { id: courseId },
+      data: { aiTutorOnline: online },
+      select: {
+        id: true,
+        currentReleaseId: true,
+        aiTestReleaseId: true,
+        aiTutorOnline: true,
+      },
+    });
+    const releaseId = this.testReleaseIdOf(updated);
+    const cfg = releaseId
+      ? await this.prisma.courseAiConfig.findUnique({
+          where: { courseId_releaseId: { courseId, releaseId } },
+        })
+      : null;
+    return await this.toView(updated, cfg, releaseId);
+  }
+
+  /** §4.2.6/§5.2：列出全部 AI Tutor（Course）及其 Online 状态（读 Course.aiTutorOnline） */
+  async listTutors(): Promise<AiTutorListView[]> {
+    const courses = await this.prisma.course.findMany({
+      select: { id: true, title: true, aiTutorOnline: true },
+      orderBy: { title: 'asc' },
+    });
+    return courses.map((c) => ({
+      courseId: c.id,
+      title: c.title,
+      online: c.aiTutorOnline,
+    }));
+  }
+
+  /**
+   * 预留钩子（§4.2.6/§5.2，2026-10-20 拍板）：用户侧读取 Online AI Tutor 列表。
+   * 本期仅预留路由与 Service 方法，不实现业务逻辑。
+   */
+  async listOnlineTutorsForUser(): Promise<never> {
+    throw new NotImplementedException('用户侧 AI Tutor 列表接口尚未实现（预留）');
   }
 
   /**
    * 对话用有效提示词解析（§4.4.2 第 4 步）：
-   * 自定义 > 课程绑定模板 > 默认模板（isDefault）。
+   * 自定义 > 课程绑定模板 > 默认模板（isDefault）。按「测试所选 Release」取配置。
    */
   async resolvePrompts(
     courseId: string,
+    releaseId: string | null,
     mode: 'LECTURE' | 'SOCRATIC',
   ): Promise<ResolvedPrompts> {
-    const cfg = await this.prisma.courseAiConfig.findUnique({
-      where: { courseId },
-    });
+    const cfg = releaseId
+      ? await this.prisma.courseAiConfig.findUnique({
+          where: { courseId_releaseId: { courseId, releaseId } },
+        })
+      : null;
     const templateId =
       mode === 'LECTURE' ? cfg?.lectureModeId : cfg?.socraticModeId;
     const template = templateId
@@ -126,22 +278,33 @@ export class AiConfigService {
       : await this.prisma.promptTemplate.findFirst({
           where: { mode, isDefault: true },
         });
+    // 按模式取自定义覆盖（2026-10-20 二次改拍）
+    const customPrompt =
+      mode === 'LECTURE' ? cfg?.lectureSystemPrompt : cfg?.socraticSystemPrompt;
+    const customWelcome =
+      mode === 'LECTURE' ? cfg?.lectureWelcomeMsg : cfg?.socraticWelcomeMsg;
     return {
-      systemPrompt: cfg?.customSystemPrompt || template?.systemPrompt || '',
-      welcomeMsg: cfg?.customWelcomeMsg || template?.welcomeMsg || '',
+      systemPrompt: customPrompt || template?.systemPrompt || '',
+      welcomeMsg: customWelcome || template?.welcomeMsg || '',
     };
   }
 
-  /** 对话用运行参数：Provider/模型/明文 key（课程级解密，回退 env 全局）/baseUrl */
-  async resolveRuntime(courseId: string): Promise<{
+  /** 对话用运行参数：Provider/模型/明文 key（该 Release 配置解密，回退 env 全局）/baseUrl（模型按模式） */
+  async resolveRuntime(
+    courseId: string,
+    releaseId: string | null,
+    mode: 'LECTURE' | 'SOCRATIC',
+  ): Promise<{
     provider: string;
     model: string;
     apiKey: string;
     baseUrl: string;
   }> {
-    const cfg = await this.prisma.courseAiConfig.findUnique({
-      where: { courseId },
-    });
+    const cfg = releaseId
+      ? await this.prisma.courseAiConfig.findUnique({
+          where: { courseId_releaseId: { courseId, releaseId } },
+        })
+      : null;
     const apiKey = cfg?.apiKey
       ? this.crypto.decrypt(cfg.apiKey)
       : (this.config.get<string>('OPENROUTER_API_KEY') ?? '');
@@ -150,9 +313,11 @@ export class AiConfigService {
         '未配置可用的 LLM API Key（课程级未设置且 OPENROUTER_API_KEY 缺失）',
       );
     }
+    const modeModel =
+      mode === 'LECTURE' ? cfg?.lectureModel : cfg?.socraticModel;
     return {
       provider: cfg?.llmProvider ?? 'openrouter',
-      model: cfg?.llmModel ?? this.defaultModel(),
+      model: modeModel ?? this.defaultModel(),
       apiKey,
       baseUrl:
         this.config.get<string>('OPENROUTER_BASE_URL') ??
@@ -160,36 +325,66 @@ export class AiConfigService {
     };
   }
 
+  /** 解析「测试所选 Release」id：Course.aiTestReleaseId ?? currentReleaseId（§5.2） */
+  private testReleaseIdOf(course: CourseRef): string | null {
+    return course.aiTestReleaseId ?? course.currentReleaseId;
+  }
+
+  /** 保存/重置配置必须有可绑定的 Release，否则拒绝（§5.2 边界） */
+  private requireReleaseId(course: CourseRef): string {
+    const releaseId = this.testReleaseIdOf(course);
+    if (!releaseId) {
+      throw new BadRequestException(
+        '该课程尚未发布知识库版本，无法保存或重置 AI 配置（请先创建 Release）',
+      );
+    }
+    return releaseId;
+  }
+
   private async toView(
-    courseId: string,
+    course: CourseRef,
     cfg: CourseAiConfig | null,
-    currentReleaseId: string | null,
+    releaseId: string | null,
   ): Promise<AiConfigView> {
-    let currentReleaseTag: string | null = null;
-    if (currentReleaseId) {
+    let releaseTag: string | null = null;
+    if (releaseId) {
       const release = await this.prisma.release.findUnique({
-        where: { id: currentReleaseId },
+        where: { id: releaseId },
         select: { versionTag: true },
       });
-      currentReleaseTag = release?.versionTag ?? null;
+      releaseTag = release?.versionTag ?? null;
     }
     return {
-      courseId,
+      courseId: course.id,
+      releaseId,
+      releaseTag,
+      isLive: releaseId != null && releaseId === course.currentReleaseId,
       llmProvider: cfg?.llmProvider ?? 'openrouter',
-      llmModel: cfg?.llmModel ?? this.defaultModel(),
-      customSystemPrompt: cfg?.customSystemPrompt ?? null,
-      customWelcomeMsg: cfg?.customWelcomeMsg ?? null,
-      lectureTemplateId: cfg?.lectureModeId ?? null,
-      socraticTemplateId: cfg?.socraticModeId ?? null,
+      // 2026-10-20 二次改拍：System Prompt / Welcome / Model 按模式分组返回
+      lecture: {
+        systemPrompt: cfg?.lectureSystemPrompt ?? null,
+        welcomeMsg: cfg?.lectureWelcomeMsg ?? null,
+        model: cfg?.lectureModel ?? this.defaultModel(),
+      },
+      socratic: {
+        systemPrompt: cfg?.socraticSystemPrompt ?? null,
+        welcomeMsg: cfg?.socraticWelcomeMsg ?? null,
+        model: cfg?.socraticModel ?? this.defaultModel(),
+      },
       hasApiKey: Boolean(cfg?.apiKey),
-      currentReleaseTag,
+      online: course.aiTutorOnline,
     };
   }
 
-  private async ensureCourse(courseId: string): Promise<{ id: string; currentReleaseId: string | null }> {
+  private async ensureCourse(courseId: string): Promise<CourseRef> {
     const found = await this.prisma.course.findUnique({
       where: { id: courseId },
-      select: { id: true, currentReleaseId: true },
+      select: {
+        id: true,
+        currentReleaseId: true,
+        aiTestReleaseId: true,
+        aiTutorOnline: true,
+      },
     });
     if (!found) throw new NotFoundException('课程不存在');
     return found;

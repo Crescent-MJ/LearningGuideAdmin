@@ -1,8 +1,15 @@
 import { create } from 'zustand'
-import { aiApi, chatStream, type AiConfigView, type AiMode, type PromptTemplate } from '../api/ai'
-import { knowledgeApi, type Course } from '../api/knowledge'
+import {
+  aiApi,
+  chatStream,
+  type AiConfigView,
+  type AiMode,
+  type AiTutorListView,
+  type PromptTemplate,
+} from '../api/ai'
+import { knowledgeApi, type Course, type ReleaseSummary } from '../api/knowledge'
 
-/** §4.3.4 对话消息格式（role: user | ai） */
+/** §4.3.5 对话消息格式（role: user | ai） */
 export interface ChatMessage {
   role: 'user' | 'ai'
   content: string
@@ -29,13 +36,28 @@ interface AiState {
   messages: ChatMessage[]
   streaming: boolean
   error: string | null
+  /** 「管理所有 online」弹窗开关（§4.2.6） */
+  tutorManagerOpen: boolean
+  /** 全部 AI Tutor 列表（弹窗数据源） */
+  tutors: AiTutorListView[]
+  tutorsLoading: boolean
+  /** 当前课程的 Release 列表（按发布时间倒序；头部 Release 选择器数据源，§4.3.1） */
+  releases: ReleaseSummary[]
 
   init: () => Promise<void>
   selectCourse: (courseId: string) => Promise<void>
   setMode: (mode: AiMode) => Promise<void>
   patchForm: (patch: Partial<AiForm>) => void
-  save: () => Promise<void>
+  save: () => Promise<boolean>
   reset: () => Promise<void>
+  setOnline: (online: boolean) => Promise<void>
+  setTutorOnline: (courseId: string, online: boolean) => Promise<void>
+  openTutorManager: () => Promise<void>
+  closeTutorManager: () => void
+  /** 切换「测试所选 Release」（§4.3.1，持久化 aiTestReleaseId，并加载该 Release 的配置） */
+  selectRelease: (releaseId: string) => Promise<void>
+  /** Set Live：把测试所选 Release 设为上线版本（§3.4.4，轻量） */
+  setLive: () => Promise<void>
   newChat: () => void
   send: (text: string) => Promise<void>
   isDirty: () => boolean
@@ -63,16 +85,21 @@ function persistChat(courseId: string, mode: AiMode, messages: ChatMessage[]) {
 
 const now = () => new Date().toISOString()
 
-/** 有效提示词解析，与后端 resolvePrompts 同口径：自定义 > 默认模板（§4.4.2 第 4 步） */
-function effectivePrompts(
+/**
+ * 按模式构建表单，与后端同口径（2026-10-20 二次改拍）：
+ * System Prompt / Welcome 自定义 > 该模式模板默认；Model 取该模式生效模型（已含默认回退）。
+ */
+function buildForm(
   config: AiConfigView | null,
   templates: AiState['templates'],
   mode: AiMode,
-): { systemPrompt: string; welcomeMsg: string } {
+): AiForm {
   const t = templates[mode]
+  const view = mode === 'LECTURE' ? config?.lecture : config?.socratic
   return {
-    systemPrompt: config?.customSystemPrompt || t?.systemPrompt || '',
-    welcomeMsg: config?.customWelcomeMsg || t?.welcomeMsg || '',
+    systemPrompt: view?.systemPrompt || t?.systemPrompt || '',
+    welcomeMsg: view?.welcomeMsg || t?.welcomeMsg || '',
+    llmModel: view?.model || '',
   }
 }
 
@@ -89,6 +116,10 @@ export const useAiStore = create<AiState>((set, get) => ({
   messages: [],
   streaming: false,
   error: null,
+  tutorManagerOpen: false,
+  tutors: [],
+  tutorsLoading: false,
+  releases: [],
 
   async init() {
     const [courses, models, prompts] = await Promise.all([
@@ -108,39 +139,47 @@ export const useAiStore = create<AiState>((set, get) => ({
 
   async selectCourse(courseId) {
     const { mode, templates } = get()
-    const config = await aiApi.getConfig(courseId)
-    const eff = effectivePrompts(config, templates, mode)
-    const stored = loadChat(courseId, mode)
-    const form = {
-      systemPrompt: eff.systemPrompt,
-      welcomeMsg: eff.welcomeMsg,
-      llmModel: config.llmModel,
+    try {
+      const [config, releases] = await Promise.all([
+        aiApi.getConfig(courseId),
+        knowledgeApi.listReleases(courseId),
+      ])
+      const form = buildForm(config, templates, mode)
+      const stored = loadChat(courseId, mode)
+      set({
+        selectedCourseId: courseId,
+        config,
+        releases,
+        form,
+        initialForm: { ...form },
+        messages: stored ?? (form.welcomeMsg ? [{ role: 'ai', content: form.welcomeMsg, createdAt: now() }] : []),
+        error: null,
+      })
+    } catch (e) {
+      // 切换失败不抛（避免未捕获 rejection），错误经 error 状态呈现
+      set({ error: (e as Error).message })
     }
-    set({
-      selectedCourseId: courseId,
-      config,
-      form,
-      initialForm: { ...form },
-      messages: stored ?? (eff.welcomeMsg ? [{ role: 'ai', content: eff.welcomeMsg, createdAt: now() }] : []),
-      error: null,
-    })
   },
 
   async setMode(mode) {
-    const { selectedCourseId, config, templates } = get()
-    if (!selectedCourseId || !config) {
-      set({ mode })
-      return
+    try {
+      const { selectedCourseId, config, templates } = get()
+      if (!selectedCourseId || !config) {
+        set({ mode })
+        return
+      }
+      // 2026-10-20 二次改拍：System Prompt / Welcome / Model 三者均载入对应模式的值
+      const form = buildForm(config, templates, mode)
+      const stored = loadChat(selectedCourseId, mode)
+      set({
+        mode,
+        form,
+        initialForm: { ...form },
+        messages: stored ?? (form.welcomeMsg ? [{ role: 'ai', content: form.welcomeMsg, createdAt: now() }] : []),
+      })
+    } catch (e) {
+      set({ error: (e as Error).message })
     }
-    const eff = effectivePrompts(config, templates, mode)
-    const stored = loadChat(selectedCourseId, mode)
-    const form = { ...get().form, systemPrompt: eff.systemPrompt, welcomeMsg: eff.welcomeMsg }
-    set({
-      mode,
-      form,
-      initialForm: { ...form },
-      messages: stored ?? (eff.welcomeMsg ? [{ role: 'ai', content: eff.welcomeMsg, createdAt: now() }] : []),
-    })
   },
 
   patchForm(patch) {
@@ -158,16 +197,18 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
 
   async save() {
-    const { selectedCourseId, form } = get()
-    if (!selectedCourseId) return
+    const { selectedCourseId, form, mode } = get()
+    if (!selectedCourseId) return false
     set({ saving: true })
     try {
+      // 2026-10-20 二次改拍：带 mode，只保存当前模式的三项值
       const payload: Parameters<typeof aiApi.saveConfig>[0] = {
         courseId: selectedCourseId,
+        mode,
         llmProvider: 'openrouter',
         llmModel: form.llmModel,
-        customSystemPrompt: form.systemPrompt,
-        customWelcomeMsg: form.welcomeMsg,
+        systemPrompt: form.systemPrompt,
+        welcomeMsg: form.welcomeMsg,
       }
       const next = await aiApi.saveConfig(payload)
       set({
@@ -175,8 +216,10 @@ export const useAiStore = create<AiState>((set, get) => ({
         initialForm: { ...form },
         error: null,
       })
+      return true
     } catch (e) {
       set({ error: (e as Error).message })
+      return false
     } finally {
       set({ saving: false })
     }
@@ -185,18 +228,90 @@ export const useAiStore = create<AiState>((set, get) => ({
   async reset() {
     const { selectedCourseId, mode, templates } = get()
     if (!selectedCourseId) return
-    const next = await aiApi.resetConfig(selectedCourseId)
-    const eff = effectivePrompts(next, templates, mode)
-    const form = {
-      systemPrompt: eff.systemPrompt,
-      welcomeMsg: eff.welcomeMsg,
-      llmModel: next.llmModel,
-    }
+    // 2026-10-20 二次改拍：只重置当前模式
+    const next = await aiApi.resetConfig(selectedCourseId, mode)
+    const form = buildForm(next, templates, mode)
     set({
       config: next,
       form,
       initialForm: { ...form },
     })
+  },
+
+  /** §4.2.6 顶部卡片 Online 开关：切换即时生效（当前选中课程） */
+  async setOnline(online) {
+    const { selectedCourseId, tutors } = get()
+    if (!selectedCourseId) return
+    try {
+      const next = await aiApi.setOnline(selectedCourseId, online)
+      set({
+        config: next,
+        // 同步弹窗列表中同一课程行的状态（若已加载）
+        tutors: tutors.map((t) =>
+          t.courseId === selectedCourseId ? { ...t, online: next.online } : t,
+        ),
+        error: null,
+      })
+    } catch (e) {
+      set({ error: (e as Error).message })
+      throw e
+    }
+  },
+
+  /** §4.2.6 弹窗表格行内切换：点即改即存；若为当前课程，同步顶部卡片开关 */
+  async setTutorOnline(courseId, online) {
+    const next = await aiApi.setOnline(courseId, online)
+    set((s) => ({
+      tutors: s.tutors.map((t) => (t.courseId === courseId ? { ...t, online: next.online } : t)),
+      config: s.selectedCourseId === courseId ? next : s.config,
+    }))
+  },
+
+  /** 打开「管理所有 online」弹窗并拉取列表（§4.2.6） */
+  async openTutorManager() {
+    set({ tutorManagerOpen: true, tutorsLoading: true })
+    try {
+      const tutors = await aiApi.listTutors()
+      set({ tutors, tutorsLoading: false })
+    } catch (e) {
+      set({ tutorsLoading: false, error: (e as Error).message })
+    }
+  },
+
+  closeTutorManager() {
+    set({ tutorManagerOpen: false })
+  },
+
+  /** §4.3.1 头部 Release 选择器：切换测试所选 Release 并加载其已保存配置（按当前模式） */
+  async selectRelease(releaseId) {
+    const { selectedCourseId } = get()
+    if (!selectedCourseId) return
+    try {
+      const next = await aiApi.setActiveRelease(selectedCourseId, releaseId)
+      const { mode, templates } = get()
+      const form = buildForm(next, templates, mode)
+      set({ config: next, form, initialForm: { ...form }, error: null })
+    } catch (e) {
+      set({ error: (e as Error).message })
+      throw e
+    }
+  },
+
+  /** §3.4.4 Set Live：把测试所选 Release 设为上线版本（轻量），并刷新配置/列表 */
+  async setLive() {
+    const { selectedCourseId, config } = get()
+    if (!selectedCourseId || !config?.releaseId) return
+    try {
+      await knowledgeApi.setLive(selectedCourseId, config.releaseId)
+      const [next, releases] = await Promise.all([
+        aiApi.getConfig(selectedCourseId),
+        knowledgeApi.listReleases(selectedCourseId),
+      ])
+      set({ config: next, releases, error: null })
+    } catch (e) {
+      set({ error: (e as Error).message })
+      throw e
+    }
   },
 
   newChat() {

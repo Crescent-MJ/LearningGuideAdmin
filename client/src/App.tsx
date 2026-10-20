@@ -9,7 +9,7 @@ import {
   type KnowledgeTabKey,
 } from './components/knowledge/KnowledgeTabBar'
 import { KnowledgeSystem } from './pages/KnowledgeSystem'
-import { AITutor } from './pages/AITutor'
+import { AITutor, AITutorTopBar } from './pages/AITutor'
 import { tokens } from './theme/tokens'
 
 /**
@@ -57,9 +57,12 @@ function App() {
           activeModule={activeModule}
           onModuleChange={setActiveModule}
           topBar={
+            // Knowledge：整宽 Tab 栏；AI Tutor：与之展示方式一致的课程标题栏（2026-10-20）
             activeModule === 'knowledge' ? (
               <KnowledgeTabBar active={knowledgeTab} onChange={setKnowledgeTab} />
-            ) : undefined
+            ) : (
+              <AITutorTopBar />
+            )
           }
           sidebar={
             // 课程树边栏仅在 "Knowledge Pages" Tab 显示；"Releases" Tab 下隐藏（保留最左侧模块导航列）

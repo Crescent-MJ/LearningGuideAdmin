@@ -1,15 +1,20 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ReleasesService } from './releases.service';
 import { PrismaService } from '../prisma/prisma.service';
 
 /**
  * ReleasesService 单元测试（2026-10-16 扁平化：lessons → pages）。
- * 快照结构、versionTag 格式、发布即激活、切换激活版本（重建 Page 草稿）与 isActive 标注。
+ * 快照结构、versionTag 格式、**纯快照（不改 Live 指针）**、切换激活版本（重建 Page 草稿）、
+ * isActive/isTestSelected 标注与删除版本（双保护）。
  */
 describe('ReleasesService', () => {
   const mockTx = {
     course: { findUnique: jest.fn(), update: jest.fn() },
-    release: { create: jest.fn() },
+    release: {
+      create: jest.fn(),
+      findUnique: jest.fn(),
+      delete: jest.fn(),
+    },
     page: { deleteMany: jest.fn(), create: jest.fn() },
   };
   const mockPrisma = {
@@ -27,7 +32,7 @@ describe('ReleasesService', () => {
     service = new ReleasesService(mockPrisma as unknown as PrismaService);
   });
 
-  it('publish：快照应含 pages 内容，versionTag 匹配 CourseName_YYYYMMDDHHmm，且发布即激活（§3.4.3）', async () => {
+  it('publish：快照应含 pages 内容，versionTag 匹配 CourseName_YYYYMMDDHHmm，纯快照不改 Live 指针，且置 editingReleaseId（§3.4.3）', async () => {
     mockTx.course.findUnique.mockResolvedValue({
       id: 'c1',
       title: '数学基础',
@@ -50,9 +55,10 @@ describe('ReleasesService', () => {
       ],
     });
     expect(result.revisionNotes).toBe('首发');
+    // 纯快照：不改动 currentReleaseId；但置当前编辑版本指针 = 新 Release（2026-10-20 三次改拍）
     expect(mockTx.course.update).toHaveBeenCalledWith({
       where: { id: 'c1' },
-      data: { currentReleaseId: 'r1' },
+      data: { editingReleaseId: 'r1' },
     });
     // 快照仅收录 SYNCED 节点：事务内查询条件应带 syncState 过滤
     const courseQuery = mockTx.course.findUnique.mock
@@ -67,10 +73,12 @@ describe('ReleasesService', () => {
     ).rejects.toThrow(NotFoundException);
   });
 
-  it('findAllByCourse：列表不含 snapshotData，且按 currentReleaseId 标注 isActive', async () => {
+  it('findAllByCourse：列表不含 snapshotData，且标注 isActive / isTestSelected / isEditing', async () => {
     mockPrisma.course.findUnique.mockResolvedValue({
       id: 'c1',
       currentReleaseId: 'r1',
+      aiTestReleaseId: 'r2',
+      editingReleaseId: 'r2',
     });
     mockPrisma.release.findMany.mockResolvedValue([
       { id: 'r1', versionTag: 'v1', revisionNotes: 'a', createdAt: 't1' },
@@ -78,13 +86,84 @@ describe('ReleasesService', () => {
     ]);
     const list = await service.findAllByCourse('c1');
     expect(list.map((r) => r.isActive)).toEqual([true, false]);
+    expect(list.map((r) => r.isTestSelected)).toEqual([false, true]);
+    expect(list.map((r) => r.isEditing)).toEqual([false, true]);
     const select = mockPrisma.release.findMany.mock.calls[0][0] as {
       select: { snapshotData?: unknown };
     };
     expect(select.select.snapshotData).toBeUndefined();
   });
 
-  it('activate：事务内重建 Page 草稿并更新 currentReleaseId', async () => {
+  it('remove：Live 版本拒绝删除 409（§3.4.5 双保护）', async () => {
+    mockTx.release.findUnique.mockResolvedValue({
+      id: 'r1',
+      courseId: 'c1',
+      versionTag: 'v1',
+    });
+    mockTx.course.findUnique.mockResolvedValue({
+      currentReleaseId: 'r1',
+      aiTestReleaseId: null,
+    });
+    await expect(service.remove('r1')).rejects.toThrow(ConflictException);
+    expect(mockTx.release.delete).not.toHaveBeenCalled();
+  });
+
+  it('remove：后台测试所选版本拒绝删除 409（§3.4.5 双保护）', async () => {
+    mockTx.release.findUnique.mockResolvedValue({
+      id: 'r2',
+      courseId: 'c1',
+      versionTag: 'v2',
+    });
+    mockTx.course.findUnique.mockResolvedValue({
+      currentReleaseId: 'r1',
+      aiTestReleaseId: 'r2',
+    });
+    await expect(service.remove('r2')).rejects.toThrow(ConflictException);
+    expect(mockTx.release.delete).not.toHaveBeenCalled();
+  });
+
+  it('remove：普通版本正常删除', async () => {
+    mockTx.release.findUnique.mockResolvedValue({
+      id: 'r3',
+      courseId: 'c1',
+      versionTag: 'v3',
+    });
+    mockTx.course.findUnique.mockResolvedValue({
+      currentReleaseId: 'r1',
+      aiTestReleaseId: 'r2',
+    });
+    const result = await service.remove('r3');
+    expect(result).toEqual({ id: 'r3', versionTag: 'v3' });
+    expect(mockTx.release.delete).toHaveBeenCalledWith({ where: { id: 'r3' } });
+    // 非 editing 版本：不清空指针
+    expect(mockTx.course.update).not.toHaveBeenCalled();
+  });
+
+  it('remove：删除当前编辑版本时清空 editingReleaseId 指针（§3.4.5 三次改拍）', async () => {
+    mockTx.release.findUnique.mockResolvedValue({
+      id: 'r3',
+      courseId: 'c1',
+      versionTag: 'v3',
+    });
+    mockTx.course.findUnique.mockResolvedValue({
+      currentReleaseId: 'r1',
+      aiTestReleaseId: 'r2',
+      editingReleaseId: 'r3',
+    });
+    const result = await service.remove('r3');
+    expect(result).toEqual({ id: 'r3', versionTag: 'v3' });
+    expect(mockTx.course.update).toHaveBeenCalledWith({
+      where: { id: 'c1' },
+      data: { editingReleaseId: null },
+    });
+  });
+
+  it('remove：版本不存在 404', async () => {
+    mockTx.release.findUnique.mockResolvedValue(null);
+    await expect(service.remove('missing')).rejects.toThrow(NotFoundException);
+  });
+
+  it('activate：事务内重建 Page 草稿并置 editingReleaseId，不改动 currentReleaseId（§3.4.2 二次/三次改拍）', async () => {
     mockPrisma.course.findUnique.mockResolvedValue({ id: 'c1' });
     mockPrisma.release.findUnique.mockResolvedValue({
       id: 'r2',
@@ -115,9 +194,10 @@ describe('ReleasesService', () => {
       contentMd: '# keep',
       sortOrder: 1,
     });
+    // 仅恢复草稿并置当前编辑版本指针 = 该 Release；不改动 currentReleaseId（Live 只由 Set Live 变更）
     expect(mockTx.course.update).toHaveBeenCalledWith({
       where: { id: 'c1' },
-      data: { currentReleaseId: 'r2' },
+      data: { editingReleaseId: 'r2' },
     });
   });
 

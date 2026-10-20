@@ -121,6 +121,30 @@ export function PageFileIcon({ size = 16, color = 'currentColor', style }: IconP
 }
 
 /**
+ * 关闭 / 删除叉号图标（close-line）：用于 Releases 历史版本行尾的删除按钮
+ * 来源：通用 close 线性图标，stroke 用 currentColor 继承文字色
+ */
+export function CloseIcon({ size = 16, color = 'currentColor', style }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 16 16"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      style={style}
+    >
+      <path
+        d="M4 4L12 12M12 4L4 12"
+        stroke={color}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
+/**
  * 通知铃铛图标（notification-3-line）
  * 来源：节点 665:904（20×20），用于 Header 通知入口
  */
