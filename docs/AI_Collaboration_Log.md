@@ -18,7 +18,7 @@
   - 新增 `server/src/ai/ai-chat-logger.spec.ts`（2 例）与 `server/src/ai/ai-chat.service.spec.ts`（4 例）
 - **自测证据**：`npm run build`（nest build）退出码 0；`npm test` **13 suites / 78 tests** 全通过；`npm run test:e2e` **5 suites / 70 tests** 全通过；新增两个 spec **6 tests** 全通过
 - **审查结论**：首轮 Review Agent **REQUEST_CHANGES**（唯一 Blocking：本协作日志缺失，本条目即补）。采纳 Non-blocking 2 项——`void write` 补 `.catch()` 防未来替换实现后 unhandled rejection；logger 单测改为字段集合精确匹配（多出 apiKey/baseUrl 即失败）。复审 **APPROVE（0 Blocking）**。后续项：SSE 控制器未监听 `res.on('close')`，`aborted` 分支在真实链路几乎不可达；e2e 直连真实 logger 会生成本地日志产物（已 gitignore）；error 字段未对 baseUrl/apiKey 做防御性脱敏。
-- **Git**：未提交（沿用用户「攒批不推送」口径）
+- **Git**：`feature/ai-chat-log-v1` 已推送；PR https://github.com/Crescent-MJ/KnowledgeSystem/pull/8 已合并入 `main`（merge commit `49db2f9`）
 - **下一步**：用户手动在 KS 后台跑几轮对话，查看 `server/app-logs/ai-chat-<日期>.log`
 
 ---
