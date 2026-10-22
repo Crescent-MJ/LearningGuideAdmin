@@ -18,6 +18,7 @@ import {
   issueResetToken,
   resetLink,
   revokeTokensForEmployee,
+  tokenStateToErrorCode,
 } from "@/modules/user-authentication/services/verificationTokens";
 
 export type FlowOutcome = { ok: true } | { ok: false; code: ErrorCode };
@@ -41,7 +42,8 @@ export async function activateWithToken(input: {
 
   const inspected = await inspectToken(input.rawToken, "ACTIVATION");
   if (inspected.state !== "USABLE" || !inspected.tokenId || !inspected.employeeId) {
-    return { ok: false, code: "INVALID_TOKEN" };
+    // PORT-ACT-003：区分过期与已使用，页面据此显示专用提示
+    return { ok: false, code: tokenStateToErrorCode(inspected.state) };
   }
 
   const consumed = await consumeOnce(inspected.tokenId);
@@ -131,7 +133,7 @@ export async function resetWithToken(input: {
 
   const inspected = await inspectToken(input.rawToken, "PASSWORD_RESET");
   if (inspected.state !== "USABLE" || !inspected.tokenId || !inspected.employeeId) {
-    return { ok: false, code: "INVALID_TOKEN" };
+    return { ok: false, code: tokenStateToErrorCode(inspected.state) };
   }
 
   const consumed = await consumeOnce(inspected.tokenId);

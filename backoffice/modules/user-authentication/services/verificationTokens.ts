@@ -6,6 +6,36 @@ import { generateRawToken, hashToken } from "@/modules/user-authentication/servi
 
 export type TokenState = "USABLE" | "NOT_FOUND" | "USED" | "REVOKED" | "EXPIRED";
 
+type ClassifiableToken = {
+  consumedAt: Date | null;
+  revokedAt: Date | null;
+  expiresAt: Date;
+} | null;
+
+/**
+ * 纯判定函数（PRD PORT-ACT-003 要求区分「已过期」与「已使用」）。
+ * 顺序即优先级：已消费 > 已吊销 > 已过期 > 可用。
+ */
+export function classifyTokenState(
+  record: ClassifiableToken,
+  nowMs: number = Date.now()
+): TokenState {
+  if (!record) return "NOT_FOUND";
+  if (record.consumedAt) return "USED";
+  if (record.revokedAt) return "REVOKED";
+  if (record.expiresAt.getTime() <= nowMs) return "EXPIRED";
+  return "USABLE";
+}
+
+export type TokenErrorCode = "INVALID_TOKEN" | "TOKEN_EXPIRED" | "TOKEN_ALREADY_USED";
+
+/** 把令牌状态翻译成对外的稳定错误码，供页面选择专用面板。 */
+export function tokenStateToErrorCode(state: TokenState): TokenErrorCode {
+  if (state === "EXPIRED") return "TOKEN_EXPIRED";
+  if (state === "USED" || state === "REVOKED") return "TOKEN_ALREADY_USED";
+  return "INVALID_TOKEN";
+}
+
 function expiryFor(purpose: TokenPurpose): Date {
   const hours = purpose === "ACTIVATION" ? ACTIVATION_TOKEN_HOURS : RESET_TOKEN_HOURS;
   return new Date(Date.now() + hours * 60 * 60 * 1000);
@@ -46,17 +76,11 @@ export async function inspectToken(
   purpose: TokenPurpose
 ): Promise<{ state: TokenState; employeeId: string | null; tokenId: string | null }> {
   const record = await tokenRepository.findByHash(hashToken(rawToken), purpose);
-  if (!record) return { state: "NOT_FOUND", employeeId: null, tokenId: null };
-  if (record.consumedAt) {
-    return { state: "USED", employeeId: record.employeeId, tokenId: record.tokenId };
-  }
-  if (record.revokedAt) {
-    return { state: "REVOKED", employeeId: record.employeeId, tokenId: record.tokenId };
-  }
-  if (record.expiresAt.getTime() <= Date.now()) {
-    return { state: "EXPIRED", employeeId: record.employeeId, tokenId: record.tokenId };
-  }
-  return { state: "USABLE", employeeId: record.employeeId, tokenId: record.tokenId };
+  return {
+    state: classifyTokenState(record),
+    employeeId: record?.employeeId ?? null,
+    tokenId: record?.tokenId ?? null,
+  };
 }
 
 /** 单次消费：并发请求只有一个能成功（INV-ONE-USE-TOKEN）。 */

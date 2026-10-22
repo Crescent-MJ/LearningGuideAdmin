@@ -725,3 +725,31 @@
 - **自测证据**：`npx tsc --noEmit` 通过；`npm run lint` 0 warning；`npm run test:unit` 19/19 通过；`npm run build` 成功（22 条路由）
 - **待办**：`docs/design/*.json` 为排障产物，交付前清理或加入 `.gitignore`；`backoffice/.env.local` 需按 `.env.example` 补齐后执行 `npm run db:migrate` + `bootstrap:admin`
 
+
+---
+
+## 2026-10-22 ~ BackOffice Portal P0 修复审查 Blocking（B1~B4）
+
+- **任务**：修复自查审查中列出的 4 个 Blocking，并保证无回归；随后本地跑通并落库验证
+- **用户拍板**：① 修复 B1~B4；② 先在本地跑起来（已执行迁移与 bootstrap）；③ 提交并推送 `feature/backoffice-portal`
+- **变更清单**：
+  - B2（PORT-ACT-003）：新增 `TOKEN_EXPIRED` / `TOKEN_ALREADY_USED` 错误码（410），
+    `verificationTokens.ts` 抽出纯函数 `classifyTokenState` / `tokenStateToErrorCode`；
+    Activate / Reset 页面按错误码显示专用面板（过期 / 已使用 / 无效）
+  - B1（PORT-NAV-006）：新增 `lib/localeCookie.ts`、`lib/localePreference.ts`、
+    `repositories/preferencesRepository.ts`、`app/api/preferences/locale`；
+    middleware 按 URL 同步 Cookie；登录时读账号偏好并回写 Cookie，前端按返回的 locale 落地
+  - B3：`/api/session` 不再从 `pathname` 解析 locale，改为 `?locale=` 显式参数 → Cookie 偏好 → 默认语言
+  - B4：新增 `modules/rbac/access.ts`（纯判定），路由与测试共用；
+    新增 4 个测试文件：access / verificationTokens / rateLimit / envelope
+  - 其他：`package.json` dev/start 固定端口 3200（本机 3000 被 NestJS 占用）
+- **本地运行环境**：复用现有 PostgreSQL 16（`learning_guide_db`），
+  首次真实执行 `db:migrate` 与 `bootstrap:admin`，生成 `.env.local`（已被 .gitignore 忽略）
+- **自测证据**：
+  - `npx tsc --noEmit` 0 error；`npm run lint` 0 warning；`npm run test:unit` **44/44 通过**；`npm run build` 成功（23 路由）
+  - HTTP 层 24 项实测：未登录 307/403、错密码 401、正确登录 200+Set-Cookie、
+    重复邮箱 409、登出后会话失效、过期令牌 410 `TOKEN_EXPIRED`、重复令牌 410 `TOKEN_ALREADY_USED`、
+    偏好存 zh-CN 后重新登录返回 zh-CN、`/api/session` landing 正常
+- **仍未覆盖**：`client/`、`server/` 零改动；无 CSRF 令牌；限流仍为单实例内存；
+  邮件仍为 console adapter；顶部栏缺 logo；迁移脚本无回滚（只做前向）
+

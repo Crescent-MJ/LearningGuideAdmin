@@ -338,9 +338,21 @@ button {
 .localeBadge {
   border: 1px solid var(--border);
   border-radius: 999px;
-  padding: 2px 10px;
+  padding: 4px 12px;
   font-size: 12px;
   color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.localeBadge:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.localeBadge:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .content {

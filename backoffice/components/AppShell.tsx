@@ -5,7 +5,8 @@ import { useState } from "react";
 
 import type { ErrorCode } from "@/contracts/envelope";
 import type { EmployeeRole } from "@/contracts/employee";
-import { otherLocale, localeHref, type Locale } from "@/lib/i18n/config";
+import { LocaleSwitch } from "@/components/LocaleSwitch";
+import type { Locale } from "@/lib/i18n/config";
 import { t } from "@/lib/i18n/messages";
 import { useLocale } from "@/lib/i18n/useLocale";
 import {
@@ -61,7 +62,6 @@ export function AppShell({
   const [passwordOpen, setPasswordOpen] = useState(false);
 
   const menus = visibleMenus(employee.role);
-  const target = otherLocale(locale);
 
   async function signOut() {
     await fetch("/api/auth/sign-out", { method: "POST" });
@@ -107,9 +107,7 @@ export function AppShell({
           </span>
 
           <div className="headerRight">
-            <a className="localeBadge" href={localeHref(pathname, target)}>
-              {locale} → {target}
-            </a>
+            <LocaleSwitch persist />
 
             <span className="employeeName">{employee.displayName}</span>
             <span className="roleTag">{t(locale, `roles.${employee.role}`)}</span>

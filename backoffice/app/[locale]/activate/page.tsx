@@ -7,6 +7,24 @@ import { t } from "@/lib/i18n/messages";
 import { useLocale } from "@/lib/i18n/useLocale";
 import { useQueryToken } from "@/lib/useQueryToken";
 
+/** 这些状态说明链接已经不可用，不再显示表单（PORT-ACT-003）。 */
+const TERMINAL_CODES: readonly ErrorCode[] = [
+  "TOKEN_EXPIRED",
+  "TOKEN_ALREADY_USED",
+  "INVALID_TOKEN",
+];
+
+function shell(children: React.ReactNode) {
+  return (
+    <div className="authPage">
+      <aside className="authBrand">
+        <span className="authBrandName">Learning Guide BackOffice</span>
+      </aside>
+      <div className="authPanel">{children}</div>
+    </div>
+  );
+}
+
 export default function ActivatePage() {
   const locale = useLocale();
   const { token, ready } = useQueryToken();
@@ -47,59 +65,49 @@ export default function ActivatePage() {
   }
 
   if (!ready) {
-    return (
-      <div className="authPage">
-        <aside className="authBrand">
-          <span className="authBrandName">{t(locale, "app.name")}</span>
-        </aside>
-        <div className="authPanel">
-          <p className="authSubtitle">{t(locale, "common.loading")}</p>
-        </div>
-      </div>
-    );
+    return shell(<p className="authSubtitle">{t(locale, "common.loading")}</p>);
   }
 
   if (!token) {
-    return (
-      <div className="authPage">
-        <aside className="authBrand">
-          <span className="authBrandName">{t(locale, "app.name")}</span>
-        </aside>
-        <div className="authPanel">
-          <h1 className="authTitle">{t(locale, "activate.invalidTitle")}</h1>
-          <p className="authSubtitle">{t(locale, "activate.missingToken")}</p>
-          <a className="button" href={`/${locale}/sign-in`}>
-            {t(locale, "activate.goSignIn")}
-          </a>
-        </div>
-      </div>
+    return shell(
+      <>
+        <h1 className="authTitle">{t(locale, "activate.invalidTitle")}</h1>
+        <p className="authSubtitle">{t(locale, "activate.missingToken")}</p>
+        <a className="button" href={`/${locale}/sign-in`}>
+          {t(locale, "activate.goSignIn")}
+        </a>
+      </>
+    );
+  }
+
+  if (errorCode && TERMINAL_CODES.includes(errorCode)) {
+    const expired = errorCode === "TOKEN_EXPIRED";
+    return shell(
+      <>
+        <h1 className="authTitle">
+          {t(locale, expired ? "activate.expiredTitle" : "activate.invalidTitle")}
+        </h1>
+        <p className="authSubtitle">
+          {t(locale, expired ? "activate.expiredBody" : "activate.invalidBody")}
+        </p>
+        <a className="button" href={`/${locale}/sign-in`}>
+          {t(locale, "activate.goSignIn")}
+        </a>
+      </>
     );
   }
 
   if (done) {
-    return (
-      <div className="authPage">
-        <aside className="authBrand">
-          <span className="authBrandName">{t(locale, "app.name")}</span>
-        </aside>
-        <div className="authPanel">
-          <h1 className="authTitle">{t(locale, "activate.successTitle")}</h1>
-          <p className="authSubtitle">{t(locale, "activate.successBody")}</p>
-          <a className="button" href={`/${locale}/sign-in`}>
-            {t(locale, "activate.goSignIn")}
-          </a>
-        </div>
-      </div>
+    return shell(
+      <>
+        <h1 className="authTitle">{t(locale, "activate.successTitle")}</h1>
+        <p className="authSubtitle">{t(locale, "activate.successBody")}</p>
+        <a className="button" href={`/${locale}/sign-in`}>
+          {t(locale, "activate.goSignIn")}
+        </a>
+      </>
     );
   }
-
-  // PORT-ACT-003：过期与已使用给出不同提示
-  const invalidPanel =
-    errorCode === "INVALID_TOKEN" ? (
-      <div className="alert alertError">{t(locale, "errors.INVALID_TOKEN")}</div>
-    ) : errorCode ? (
-      <div className="alert alertError">{t(locale, `errors.${errorCode}`)}</div>
-    ) : null;
 
   return (
     <div className="authPage">
@@ -114,7 +122,9 @@ export default function ActivatePage() {
           <p className="authSubtitle">{t(locale, "activate.subtitle")}</p>
         </div>
 
-        {invalidPanel}
+        {errorCode ? (
+          <div className="alert alertError">{t(locale, `errors.${errorCode}`)}</div>
+        ) : null}
 
         <label className="field">
           <span className="fieldLabel">{t(locale, "activate.passwordLabel")}</span>

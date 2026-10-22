@@ -19,8 +19,10 @@
 | PORT-P07 | 编辑员工 / 重置密码 / 重发激活 | `app/api/admin/employees/[employeeId]/**` | 已实现 |
 | PORT-P08 | 受保护管理员初始化 | `scripts/bootstrap-admin.mjs` + DB 触发器 | 已实现 |
 | 修改密码 | 登录后自查改密并强制重新登录 | `app/api/auth/change-password`、`AppShell` 员工菜单 | 已实现 |
-| RBAC | 六角色 × 8 菜单权限矩阵 | `modules/rbac/permissions.ts` | 已实现 |
+| RBAC | 六角色 × 8 菜单权限矩阵 | `modules/rbac/permissions.ts` + `modules/rbac/access.ts` | 已实现 |
 | i18n | en-GB / zh-CN 切换 | `messages/*.json`、`lib/i18n/*`、`middleware.ts` | 已实现 |
+| PORT-NAV-006 | 语言偏好跨登录保留 | `lib/localeCookie.ts`、`repositories/preferencesRepository.ts`、`app/api/preferences/locale` | 已实现 |
+| PORT-ACT-003 | 过期 / 已使用链接区分 | `classifyTokenState` + `TOKEN_EXPIRED` / `TOKEN_ALREADY_USED` | 已实现 |
 
 ## 2. 技术栈（与 LearningGuidePortal 对齐）
 
@@ -87,12 +89,57 @@ Route Handler → contracts 校验 → 会话/权限 → modules/*/services → 
 | PRD §8 原型图以 .docx 内嵌图片存在，仓库内 `md_assets/` 缺失 | 无法逐像素对齐原型 | 由用户提供 Figma/截图或补齐 `md_assets/` |
 | Figma MCP 在本机未注入 agent 工具 | 无法读取设计上下文 | 见 `docs/AI_Collaboration_Log.md` 记录 |
 | 页面样式为按 PRD 描述自建，非设计稿还原 | 视觉细节需人工调整 | 设计稿到位后重做样式层 |
+| 顶部栏未放 logo（PRD PORT-NAV-001 要求） | 与原型不一致 | 需设计侧提供 logo 资产 |
+| Actions 列为并列按钮，非 per-row 菜单（PORT-LST-005） | 交互形态差异 | 由视觉确认后再改 |
+| Last Login 按 UTC 显示 | 非本地时区格式 | 需要时按 locale 格式化 |
+| 无 CSRF token（依赖 SameSite=Lax） | 跨站表单受 Cookie 策略保护 | 如需强防护再加双提交令牌 |
+
+## 6.1 工程参数取值（PRD §14.3 允许自定，需产品确认）
+
+| 参数 | 取值 | 位置 |
+|---|---|---|
+| 密码长度 | 12–128 字符 | `lib/securityPolicy.ts` |
+| 激活令牌有效期 | 48 小时（PRD 强制） | `ACTIVATION_TOKEN_HOURS` |
+| 重置令牌有效期 | 2 小时 | `RESET_TOKEN_HOURS` |
+| 会话绝对超时 | 12 小时 | `SESSION_MAX_HOURS` |
+| 会话空闲超时 | 30 分钟 | `SESSION_IDLE_MINUTES` |
+| 登录限流 | 5 分钟内 10 次 / IP | `SIGN_IN_MAX_PER_WINDOW` |
+| 发信限流 | 5 分钟内 5 次 / IP | `EMAIL_SEND_MAX_PER_WINDOW` |
+| 列表分页 | 默认 10，上限 100 | `EMPLOYEE_PAGE_SIZE_*` |
 
 ## 7. 验收方式
 
 ```bash
 cd backoffice
-npm run typecheck && npm run test:unit && npm run build
+npm run typecheck && npm run lint && npm run test:unit && npm run build
+```
+
+自动化测试覆盖（`tests/unit`，共 44 项）：
+
+| 文件 | 覆盖 |
+|---|---|
+| `access.test.ts` | 未登录 401 语义、非 Admin 403 语义、六角色菜单守卫 |
+| `verificationTokens.test.ts` | 令牌五态判定与优先级、错误码映射（PORT-ACT-003） |
+| `employee.test.ts` | 三态派生、登录资格、邮箱规范化、角色清单 |
+| `password.test.ts` | scrypt 往返、错误密码、盐唯一、畸形哈希不抛异常 |
+| `rateLimit.test.ts` | 阈值、`retryAfter`、按 key 隔离 |
+| `envelope.test.ts` | 信封形状、HTTP 状态映射、错误码全覆盖 |
+
+HTTP 层实测（2026-10-22，本地 dev + 真实 PostgreSQL）：
+
+```
+GET  /                          → 307 跳 /en-GB
+GET  /en-GB/course（未登录）      → 307 跳登录
+GET  /api/admin/employees（未登录）→ 403
+email-check 管理员 / 未知邮箱      → eligible=true / false
+sign-in 错误密码 / 正确密码        → 401 / 200+Set-Cookie
+GET  /api/admin/employees（已登录）→ 200 真实数据
+创建重复邮箱                      → 409
+sign-out → 再访问受保护页          → 307（会话已吊销）
+过期激活令牌                      → 410 TOKEN_EXPIRED
+重复使用激活令牌                   → 410 TOKEN_ALREADY_USED
+偏好存 zh-CN 后重新登录            → 返回 zh-CN
+GET  /api/session                → landing=/en-GB/course
 ```
 
 人工验收（浏览器操作由用户执行）：
@@ -101,5 +148,6 @@ npm run typecheck && npm run test:unit && npm run build
 2. 非 Admin 直接输入 `/en-GB/settings/employee-account` → 无权提示
 3. 非 Admin 直接输入 `/zh-CN/knowledge`（如 Operation Admin）→ 无权提示
 4. 停用某员工后其已有会话立即失效
-5. 激活链接二次使用 → 提示链接无效
-6. 切换语言后 URL、页面状态保持不变
+5. 点专用激活链接过期/已用 → 看到不同提示文案
+6. 切到中文后退出再登录 → 仍为中文
+

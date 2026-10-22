@@ -82,7 +82,11 @@
     "successTitle": "Password updated",
     "successBody": "Your password has been reset. Please sign in with the new password.",
     "invalidTitle": "Invalid or expired reset link",
-    "invalidBody": "This reset link has already been used or has expired. Please request a new one."
+    "invalidBody": "This reset link has already been used or has not been recognised. Please request a new one.",
+    "expiredTitle": "Reset link expired",
+    "expiredBody": "Reset links are valid for 2 hours. Please request a new one.",
+    "usedTitle": "Reset link already used",
+    "usedBody": "This reset link has already been used. Please request a new one."
   },
   "changePassword": {
     "title": "Change Password",
@@ -177,6 +181,8 @@
     "RATE_LIMITED": "Too many attempts. Please wait a moment and try again.",
     "PROTECTED_ADMIN_ACCOUNT": "This administrator account is protected.",
     "INVALID_TOKEN": "This link is invalid, expired or has already been used.",
+    "TOKEN_EXPIRED": "This link has expired. Please ask an administrator for a new one.",
+    "TOKEN_ALREADY_USED": "This link has already been used. Please ask an administrator for a new one.",
     "DUPLICATE_EMAIL": "Employee email already exists.",
     "PASSWORD_TOO_WEAK": "The password does not meet the minimum requirements.",
     "PASSWORD_MISMATCH": "The two passwords do not match.",

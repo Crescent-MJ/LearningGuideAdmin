@@ -1,5 +1,6 @@
 import { currentEmployee } from "@/lib/currentSession";
 import { jsonFail, jsonOk } from "@/lib/http";
+import { coerceLocale, requestedLocale } from "@/lib/localePreference";
 import {
   canAccessEmployeeAccount,
   DEFAULT_LANDING_MENU,
@@ -17,6 +18,7 @@ export type SessionPayload = {
     displayStatus: string;
     isBootstrapAdmin: boolean;
   };
+  locale: string;
   menus: { key: string; href: string }[];
   canManageEmployeeAccount: boolean;
   employeeAccountHref: string;
@@ -28,7 +30,9 @@ export async function GET(request: Request): Promise<Response> {
     const employee = await currentEmployee();
     if (!employee) return jsonFail("INVALID_EMPLOYEE_ACCOUNT", "No active session");
 
-    const locale = new URL(request.url).pathname.split("/")[1] ?? "en-GB";
+    // API 路径不含语言前缀，locale 只能来自显式参数或 Cookie 偏好
+    const explicit = coerceLocale(new URL(request.url).searchParams.get("locale"));
+    const locale = explicit ?? (await requestedLocale());
 
     return jsonOk<SessionPayload>({
       employee: {
@@ -39,6 +43,7 @@ export async function GET(request: Request): Promise<Response> {
         displayStatus: employee.displayStatus,
         isBootstrapAdmin: employee.isBootstrapAdmin,
       },
+      locale,
       menus: visibleMenus(employee.role).map((menu) => ({
         key: menu,
         href: menuHref(locale, menu),

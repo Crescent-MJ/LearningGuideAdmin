@@ -4,7 +4,8 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ErrorCode } from "@/contracts/envelope";
-import { otherLocale } from "@/lib/i18n/config";
+import { LocaleSwitch } from "@/components/LocaleSwitch";
+import type { Locale } from "@/lib/i18n/config";
 import { getMessages, t } from "@/lib/i18n/messages";
 import { useLocale } from "@/lib/i18n/useLocale";
 
@@ -15,7 +16,6 @@ const EMAIL_CHECK_DELAY_MS = 500;
 export default function SignInPage() {
   const locale = useLocale();
   const router = useRouter();
-  const target = otherLocale(locale);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -65,12 +65,18 @@ export default function SignInPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email, password }),
       });
-      const payload = (await response.json()) as { success: boolean; error: ErrorCode | null };
+      const payload = (await response.json()) as {
+        success: boolean;
+        error: ErrorCode | null;
+        data: { locale: Locale } | null;
+      };
       if (!payload.success) {
         setErrorCode(payload.error ?? "INTERNAL_ERROR");
         return;
       }
-      router.replace(`/${locale}/course`);
+      // PORT-NAV-006：账号偏好优先，服务端已把 Cookie 写成该语言
+      const nextLocale = payload.data?.locale ?? locale;
+      router.replace(`/${nextLocale}/course`);
       router.refresh();
     } catch {
       setErrorCode("INTERNAL_ERROR");
@@ -89,7 +95,7 @@ export default function SignInPage() {
       <form className="authPanel" onSubmit={handleSubmit} noValidate>
         <div className="localeSwitch">
           <span>{t(locale, "common.language")}</span>
-          <a href={`/${target}/sign-in`}>{target}</a>
+          <LocaleSwitch persist={false} />
         </div>
 
         <div>

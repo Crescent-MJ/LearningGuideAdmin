@@ -7,6 +7,12 @@ import { t } from "@/lib/i18n/messages";
 import { useLocale } from "@/lib/i18n/useLocale";
 import { useQueryToken } from "@/lib/useQueryToken";
 
+const TERMINAL_CODES: readonly ErrorCode[] = [
+  "TOKEN_EXPIRED",
+  "TOKEN_ALREADY_USED",
+  "INVALID_TOKEN",
+];
+
 export default function ResetPasswordPage() {
   const locale = useLocale();
   const { token, ready } = useQueryToken();
@@ -46,7 +52,16 @@ export default function ResetPasswordPage() {
     }
   }
 
-  if (!ready) {
+  const terminal =
+    errorCode !== null && TERMINAL_CODES.includes(errorCode)
+      ? errorCode
+      : !ready
+        ? "LOADING"
+        : token === ""
+          ? "INVALID_TOKEN"
+          : null;
+
+  if (terminal === "LOADING") {
     return (
       <div className="authPage">
         <aside className="authBrand">
@@ -59,20 +74,45 @@ export default function ResetPasswordPage() {
     );
   }
 
-  if (!token || done || errorCode === "INVALID_TOKEN") {
-    const invalid = !token || errorCode === "INVALID_TOKEN";
+  if (terminal !== null) {
+    const titleKey =
+      terminal === "TOKEN_EXPIRED"
+        ? "reset.expiredTitle"
+        : terminal === "TOKEN_ALREADY_USED"
+          ? "reset.usedTitle"
+          : "reset.invalidTitle";
+    const bodyKey =
+      terminal === "TOKEN_EXPIRED"
+        ? "reset.expiredBody"
+        : terminal === "TOKEN_ALREADY_USED"
+          ? "reset.usedBody"
+          : "reset.invalidBody";
+
     return (
       <div className="authPage">
         <aside className="authBrand">
           <span className="authBrandName">{t(locale, "app.name")}</span>
         </aside>
         <div className="authPanel">
-          <h1 className="authTitle">
-            {invalid ? t(locale, "reset.invalidTitle") : t(locale, "reset.successTitle")}
-          </h1>
-          <p className="authSubtitle">
-            {invalid ? t(locale, "reset.invalidBody") : t(locale, "reset.successBody")}
-          </p>
+          <h1 className="authTitle">{t(locale, titleKey)}</h1>
+          <p className="authSubtitle">{t(locale, bodyKey)}</p>
+          <a className="button" href={`/${locale}/sign-in`}>
+            {t(locale, "activate.goSignIn")}
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  if (done) {
+    return (
+      <div className="authPage">
+        <aside className="authBrand">
+          <span className="authBrandName">{t(locale, "app.name")}</span>
+        </aside>
+        <div className="authPanel">
+          <h1 className="authTitle">{t(locale, "reset.successTitle")}</h1>
+          <p className="authSubtitle">{t(locale, "reset.successBody")}</p>
           <a className="button" href={`/${locale}/sign-in`}>
             {t(locale, "activate.goSignIn")}
           </a>
