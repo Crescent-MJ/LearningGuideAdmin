@@ -556,6 +556,8 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 - 显示 Welcome Message 作为 AI 的第一条消息
 
 > **对话持久化拍板（2026-10-14，§12 事项 #6）**：对话记录**不落库**。"上一次聊天"经浏览器 localStorage 持久化（按 courseId+mode 隔离），短时间退出页面再回来可恢复；点击 New Chat 清空；当前无长期记忆需求。`AiChatSession` 表保留（后续调试/持久化启用用），MVP 不写入，`/api/ai/sessions` 系列接口不实现。
+>
+> **补充（2026-10-22，用户拍板）**：为支持对话质量测试，新增**文件级运行日志**（每次对话一行 JSON，落 `server/app-logs/ai-chat-*.log`），仅记录元数据与 80 字预览，**不保存完整会话、不提供会话查询接口**；与上述「不落库」决策不冲突，详见 §4.4.2 第 7 步。
 
 #### 4.3.4 对话流程
 
@@ -624,7 +626,12 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
    - Socratic 模式额外注入引导指令：`"你是一个苏格拉底式的引导者。永远不要直接给出最终答案。将答案拆解成一系列反问和引导性问题，逐步启发用户自己得出结论。"`
 5. **代理转发**：经 Provider 适配器（策略模式，首批接入 OpenRouter，OpenAI 兼容接口，2026-10-14 §12 事项 #2 拍板）调用实际 API（流式）
 6. **流式返回**：将 LLM 的流式 Chunk 以 SSE 格式转发给前端
-7. **日志记录**：MVP 不落库（2026-10-14 拍板，见 §4.3.2；AiChatSession 表保留不写入）
+7. **日志记录**：
+   - **会话不落库**（2026-10-14 拍板，见 §4.3.2；AiChatSession 表保留不写入）
+   - **运行日志落文件**（2026-10-22 用户拍板，用于对话质量测试）：每次 `streamChat` 结束后由 `AiChatLogger` 旁路追加一行 JSON 到 `server/app-logs/ai-chat-YYYY-MM-DD.log`（本地时区日期），不受会话不落库决策影响
+     - 记录字段：`ts / courseId / releaseId / mode / provider / model / historyCount / latencyMs / status(ok|error|aborted) / error(≤300 字) / questionChars / answerChars / question(≤80 字) / answer(≤80 字)`
+     - 安全约束：**绝不记录 apiKey / baseUrl / 完整 Prompt**；用户提问与模型回答均只保留前 80 字预览；写盘失败仅告警，不影响对话主流程
+     - 演进预留：日志写入封装在 `AiChatLogger.write()` 单一入口，后续替换为结构化 JSON/DB/OTel 时 `AiChatService.streamChat()` 的 Prompt 组装与 Provider 调用代码不需改动
 
 #### 4.4.3 错误处理
 
