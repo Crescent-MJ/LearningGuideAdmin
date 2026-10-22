@@ -23,5 +23,8 @@ coverage/
 *.log
 *.tmp
 
+# AI 对话运行日志（§4.4.2 第 7 步，本地运行产物）
+app-logs/
+
 # 本地测试上传文件（不上库）
 test_files/

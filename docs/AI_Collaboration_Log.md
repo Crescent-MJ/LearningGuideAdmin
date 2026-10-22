@@ -5,6 +5,24 @@
 
 ---
 
+## 2026-10-22 ｜ AI Tutor 对话运行日志（文件日志方案）
+
+- **任务（用户）**：要求「使用文件日志这个方案」为 AI Tutor 的对话质量测试提供可观测量。已确认 history 由前端 localStorage 携带、后端截最近 10 条；缺的是服务端运行日志。
+- **用户拍板**：采用**文件日志**（阶段 1）——不做 DB 落库、不加会话查询接口；2026-10-14「对话不落库」决策（§4.3.2）不变。
+- **变更清单（设计文档先行）**：
+  - 设计文档 §4.4.2 第 7 步拆为「会话不落库 + 运行日志落文件」，写明字段、安全约束与演进预留；§4.3.2 增 2026-10-22 补充段
+  - 新增 `server/src/ai/ai-chat-logger.ts`：`AiChatLogger.write()` 追加一行 JSON 到 `server/app-logs/ai-chat-YYYY-MM-DD.log`（本地时区自然日）；提问/回答压平空白后截 80 字预览、error 截 300 字；写盘失败仅 `logger.warn`
+  - 修改 `server/src/ai/ai-chat.service.ts`：构造器注入 `AiChatLogger`；`streamChat()` 包 try/catch/finally，累积 answer 并判定 `ok|error|aborted`，finally 内 `void write(...).catch()` 旁路落日志；Prompt 组装与 Provider 调用逻辑零改动
+  - 修改 `server/src/ai/ai.module.ts`：注册 `AiChatLogger`
+  - 修改 `.gitignore`：新增 `app-logs/`
+  - 新增 `server/src/ai/ai-chat-logger.spec.ts`（2 例）与 `server/src/ai/ai-chat.service.spec.ts`（4 例）
+- **自测证据**：`npm run build`（nest build）退出码 0；`npm test` **13 suites / 78 tests** 全通过；`npm run test:e2e` **5 suites / 70 tests** 全通过；新增两个 spec **6 tests** 全通过
+- **审查结论**：首轮 Review Agent **REQUEST_CHANGES**（唯一 Blocking：本协作日志缺失，本条目即补）。采纳 Non-blocking 2 项——`void write` 补 `.catch()` 防未来替换实现后 unhandled rejection；logger 单测改为字段集合精确匹配（多出 apiKey/baseUrl 即失败）。复审 **APPROVE（0 Blocking）**。后续项：SSE 控制器未监听 `res.on('close')`，`aborted` 分支在真实链路几乎不可达；e2e 直连真实 logger 会生成本地日志产物（已 gitignore）；error 字段未对 baseUrl/apiKey 做防御性脱敏。
+- **Git**：未提交（沿用用户「攒批不推送」口径）
+- **下一步**：用户手动在 KS 后台跑几轮对话，查看 `server/app-logs/ai-chat-<日期>.log`
+
+---
+
 ## 2026-10-20 ｜ 一键安装环境（Node 原生）＋第二仓库首次导入
 
 - **任务（用户）**：确认「本项目是不是缺一键安装环境的功能」，要求提供「一个可读文件声明所需环境与版本 + 一键安装」，并问「是否用了本机本地环境」、提出「用 venv 作为环境库」。

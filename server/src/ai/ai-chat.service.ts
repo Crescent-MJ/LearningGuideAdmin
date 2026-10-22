@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { AiChatLogger, type AiChatStatus } from './ai-chat-logger';
 import { AiConfigService } from './ai-config.service';
 import { ChatStreamDto } from './dto/chat-stream.dto';
 import { LlmMessage } from './providers/llm-provider.interface';
@@ -19,14 +20,16 @@ const MAX_HISTORY = 10;
 
 /** heading 文本转 slug（与 sync.service.ts / PageEditor.tsx 保持一致） */
 function slugify(text: string): string {
-  return text
-    .toLowerCase()
-    .trim()
-    // 保留 Unicode 字母/数字（含中文），仅去掉标点符号等特殊字符；
-    // 之前用 \w 会把中文全部清空，导致多个中文 heading 生成相同 key（h2-）而碰撞。
-    .replace(/[^\p{L}\p{N}\s-]/gu, '')
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-');
+  return (
+    text
+      .toLowerCase()
+      .trim()
+      // 保留 Unicode 字母/数字（含中文），仅去掉标点符号等特殊字符；
+      // 之前用 \w 会把中文全部清空，导致多个中文 heading 生成相同 key（h2-）而碰撞。
+      .replace(/[^\p{L}\p{N}\s-]/gu, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+  );
 }
 
 /** 生成带层级前缀的 heading key：`h{n}-{slug}`（与 sync.service.ts 一致） */
@@ -66,7 +69,8 @@ function splitByHeadings(md: string): {
 /**
  * AI 对话编排（§4.4.2）：限流 → 加载配置 → 聚合知识库上下文 →
  * 组装 Prompt → Provider 流式调用（失败重试最多 2 次，§4.4.3）。
- * 对话不落库（§4.3.2 拍板）。
+ * 对话不落库（§4.3.2 拍板）；每次对话结束后由 AiChatLogger 旁路写运行日志
+ * （§4.4.2 第 7 步，2026-10-22 拍板）。
  */
 @Injectable()
 export class AiChatService {
@@ -75,70 +79,112 @@ export class AiChatService {
     private readonly configs: AiConfigService,
     private readonly registry: ProviderRegistry,
     private readonly rateLimit: RateLimitService,
+    private readonly chatLogger: AiChatLogger,
   ) {}
 
   /** 产出文本增量流；首字节前失败自动重试，之后失败直接抛出由控制器转 SSE 错误帧 */
   async *streamChat(dto: ChatStreamDto): AsyncGenerator<string> {
-    this.rateLimit.assertAllowed(dto.courseId);
+    const startedAt = Date.now();
+    const history = (dto.history ?? []).slice(-MAX_HISTORY);
+    let releaseId: string | null = null;
+    let providerName = 'unknown';
+    let model = 'unknown';
+    let answer = '';
+    let finished = false;
+    let status: AiChatStatus = 'ok';
+    let errorText: string | undefined;
 
-    const course = await this.prisma.course.findUnique({
-      where: { id: dto.courseId },
-      select: {
-        id: true,
-        title: true,
-        currentReleaseId: true,
-        aiTestReleaseId: true,
-      },
-    });
-    if (!course) throw new NotFoundException('课程不存在');
+    try {
+      this.rateLimit.assertAllowed(dto.courseId);
 
-    // §4.3.1/§5.2（2026-10-20）：后台测试对话读「测试所选 Release」（aiTestReleaseId ?? currentReleaseId）
-    const releaseId = course.aiTestReleaseId ?? course.currentReleaseId;
+      const course = await this.prisma.course.findUnique({
+        where: { id: dto.courseId },
+        select: {
+          id: true,
+          title: true,
+          currentReleaseId: true,
+          aiTestReleaseId: true,
+        },
+      });
+      if (!course) throw new NotFoundException('课程不存在');
 
-    const [runtime, prompts, context] = await Promise.all([
-      this.configs.resolveRuntime(dto.courseId, releaseId, dto.mode),
-      this.configs.resolvePrompts(dto.courseId, releaseId, dto.mode),
-      this.buildContext(releaseId),
-    ]);
+      // §4.3.1/§5.2（2026-10-20）：后台测试对话读「测试所选 Release」（aiTestReleaseId ?? currentReleaseId）
+      releaseId = course.aiTestReleaseId ?? course.currentReleaseId;
 
-    const systemParts = [prompts.systemPrompt];
-    if (dto.mode === 'SOCRATIC') systemParts.push(SOCRATIC_GUIDE);
-    const messages: LlmMessage[] = [
-      {
-        role: 'system',
-        content: [
-          systemParts.filter(Boolean).join('\n\n'),
-          '[CONTEXT_START]',
-          context,
-          '[CONTEXT_END]',
-        ].join('\n'),
-      },
-      ...(dto.history ?? []).slice(-MAX_HISTORY),
-      { role: 'user', content: dto.message },
-    ];
+      const [runtime, prompts, context] = await Promise.all([
+        this.configs.resolveRuntime(dto.courseId, releaseId, dto.mode),
+        this.configs.resolvePrompts(dto.courseId, releaseId, dto.mode),
+        this.buildContext(releaseId),
+      ]);
+      providerName = runtime.provider;
+      model = runtime.model;
 
-    const provider = this.registry.get(runtime.provider);
-    const MAX_RETRIES = 2;
-    let attempt = 0;
-    while (true) {
-      attempt += 1;
-      let started = false;
-      try {
-        const gen = provider.stream({
-          model: runtime.model,
-          messages,
-          apiKey: runtime.apiKey,
-          baseUrl: runtime.baseUrl,
-        });
-        for await (const delta of gen) {
-          started = true;
-          yield delta;
+      const systemParts = [prompts.systemPrompt];
+      if (dto.mode === 'SOCRATIC') systemParts.push(SOCRATIC_GUIDE);
+      const messages: LlmMessage[] = [
+        {
+          role: 'system',
+          content: [
+            systemParts.filter(Boolean).join('\n\n'),
+            '[CONTEXT_START]',
+            context,
+            '[CONTEXT_END]',
+          ].join('\n'),
+        },
+        ...history,
+        { role: 'user', content: dto.message },
+      ];
+
+      const provider = this.registry.get(runtime.provider);
+      const MAX_RETRIES = 2;
+      let attempt = 0;
+      while (true) {
+        attempt += 1;
+        let started = false;
+        try {
+          const gen = provider.stream({
+            model: runtime.model,
+            messages,
+            apiKey: runtime.apiKey,
+            baseUrl: runtime.baseUrl,
+          });
+          for await (const delta of gen) {
+            started = true;
+            answer += delta;
+            yield delta;
+          }
+          finished = true;
+          return;
+        } catch (err) {
+          // 仅首字节前且未超重试上限才重试（§4.4.3）
+          if (started || attempt > MAX_RETRIES) throw err;
         }
-        return;
-      } catch (err) {
-        // 仅首字节前且未超重试上限才重试（§4.4.3）
-        if (started || attempt > MAX_RETRIES) throw err;
       }
+    } catch (err) {
+      status = 'error';
+      errorText = err instanceof Error ? err.message : String(err);
+      throw err;
+    } finally {
+      // 未正常结束且未报错 → 客户端断开（生成器被提前 return）
+      if (!finished && status === 'ok') status = 'aborted';
+      // 旁路写日志（§4.4.2 第 7 步）：不 await，不影响对话主流程
+      void this.chatLogger
+        .write({
+          courseId: dto.courseId,
+          releaseId,
+          mode: dto.mode,
+          provider: providerName,
+          model,
+          historyCount: history.length,
+          latencyMs: Date.now() - startedAt,
+          status,
+          error: errorText,
+          question: dto.message,
+          answer,
+        })
+        .catch(() => {
+          /* AiChatLogger 内部已兜底；此处防未来替换实现后 unhandled rejection */
+        });
     }
   }
 
@@ -148,9 +194,7 @@ export class AiChatService {
    * 不再读实时草稿——创建 Release 后未再次发布的编辑不影响 AI。快照本身已在发布时过滤 STALE 节点
    * （§3.4.3），此处无需再过滤。未发布过的课程直接报错交用户在 Knowledge Releases 页创建版本。
    */
-  private async buildContext(
-    releaseId: string | null,
-  ): Promise<string> {
+  private async buildContext(releaseId: string | null): Promise<string> {
     if (!releaseId) {
       throw new BadRequestException(
         '该课程尚未发布知识库版本，请先在 Knowledge 模块 Releases 页创建版本',
@@ -181,7 +225,9 @@ export class AiChatService {
       const sections = splitByHeadings(content);
       const rendered = sections
         .map(({ heading, level, body }) => {
-          const tags = heading ? sectionTags[headingKey(level, heading)] : undefined;
+          const tags = heading
+            ? sectionTags[headingKey(level, heading)]
+            : undefined;
           const tagLine = tags?.length ? `[TAGS: ${tags.join(', ')}]\n` : '';
           const hashes = '#'.repeat(level);
           return heading

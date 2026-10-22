@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AiChatLogger } from './ai-chat-logger';
 import { AiChatService } from './ai-chat.service';
 import { AiConfigService } from './ai-config.service';
 import { AiController, UserAiController } from './ai.controller';
@@ -19,6 +20,7 @@ import { RateLimitService } from './rate-limit.service';
     CryptoService,
     RateLimitService,
     AiConfigService,
+    AiChatLogger,
     AiChatService,
   ],
 })
