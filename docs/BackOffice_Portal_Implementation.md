@@ -1,0 +1,105 @@
+# BackOffice Portal 实现基准（P0）
+
+> 单一事实来源：本文件描述 BackOffice Portal P0 的实现范围、分层与技术决策。
+> 需求来源：`docs/Learning_Guide_BackOffice_Portal_PRD_v1_1_EN_UK.md`（PRD v1.1）。
+> 分支：`feature/backoffice-portal`　目录：`backoffice/`
+
+## 1. 范围
+
+本基准只覆盖 PRD v1.1 中标记为 **P0** 的条目，P1/P2 不实现，也不为其预留结构。
+
+| PRD 编号 | 功能 | 实现位置 | 状态 |
+|---|---|---|---|
+| PORT-P01 | 员工登录（Email Check + 密码 + 会话） | `app/[locale]/sign-in`、`app/api/auth/{email-check,sign-in}` | 已实现 |
+| PORT-P02 | 激活链接设置初始密码 | `app/[locale]/activate`、`app/api/auth/activate` | 已实现 |
+| PORT-P03 | 忘记密码 / 重置密码 | `app/[locale]/{forgot-password,reset-password}`、`app/api/auth/*-password` | 已实现 |
+| PORT-P04 | 全局导航与外壳 | `components/AppShell.tsx`、`app/[locale]/(shell)/**` | 已实现 |
+| PORT-P05 | 员工账号列表（搜索/筛选/分页） | `app/[locale]/(shell)/settings/employee-account` | 已实现 |
+| PORT-P06 | 新建员工 + 发送激活邮件 | `app/api/admin/employees`（POST） | 已实现 |
+| PORT-P07 | 编辑员工 / 重置密码 / 重发激活 | `app/api/admin/employees/[employeeId]/**` | 已实现 |
+| PORT-P08 | 受保护管理员初始化 | `scripts/bootstrap-admin.mjs` + DB 触发器 | 已实现 |
+| 修改密码 | 登录后自查改密并强制重新登录 | `app/api/auth/change-password`、`AppShell` 员工菜单 | 已实现 |
+| RBAC | 六角色 × 8 菜单权限矩阵 | `modules/rbac/permissions.ts` | 已实现 |
+| i18n | en-GB / zh-CN 切换 | `messages/*.json`、`lib/i18n/*`、`middleware.ts` | 已实现 |
+
+## 2. 技术栈（与 LearningGuidePortal 对齐）
+
+- Next.js 15 App Router，页面与 API 同仓库同部署单元
+- React 19 + TypeScript strict（含 `noUncheckedIndexedAccess`）
+- PostgreSQL，驱动 `pg`，迁移为 `db/migrations/*.sql` 顺序执行
+- 密码哈希：`node:crypto` scrypt（每账号独立盐），无外部依赖
+- 令牌：随机 32 字节，落库只存 HMAC-SHA256
+
+### 2.1 与 Admin 仓库既有规则的差异（已裁决项）
+
+| 冲突 | Admin 旧规则 | 本模块采用 | 理由 |
+|---|---|---|---|
+| 表结构管理 | Prisma Migrate | `db/migrations/*.sql` | 技术栈改为 Next.js + pg，Prisma 规则只适用于既有 `server/` |
+| 前端框架 | Vite + Ant Design（`client/`） | Next.js App Router | 与 Portal 一致；`client/` 不改造 |
+| 业务层 | NestJS 模块 | `modules/*/services` | 同一分层思想，宿主不同 |
+
+## 3. 分层与边界
+
+```
+Route Handler → contracts 校验 → 会话/权限 → modules/*/services → repositories → PostgreSQL
+```
+
+硬约束：
+
+1. Route Handler **不写业务规则、不写 SQL**，只做解析/校验/取会话/调 service/返回信封
+2. 业务规则只存在于 `modules/*/services`
+3. SQL 只存在于 `repositories/`
+4. 服务端是唯一权威：菜单可见性、员工账号页可见性、编辑范围均由服务端判定
+5. 前端隐藏按钮不是安全边界
+
+## 4. 关键业务规则落点
+
+| PRD 规则 | 落点 |
+|---|---|
+| BR-PORT-002 邮箱大小写不敏感 | `normaliseEmail` + `login_email = lower(...)` 约束 |
+| BR-PORT-004 三态状态 | `deriveDisplayStatus`，SQL 层等价展开用于筛选 |
+| BR-PORT-005 仅 Active+Verified 可登录 | `isSignInEligible`（登录、会话解析、邮箱检查三处共用） |
+| BR-PORT-006 Email Check 只对可登录账号给绿勾 | `checkEmployeeEmail` |
+| BR-PORT-008 已验证邮箱不可改 | `updateEmployee`（服务层）+ 表单禁用（展示层） |
+| BR-PORT-009 邮箱变更需重新验证 | 吊销旧令牌 + 向新地址重发激活 |
+| BR-PORT-012 停用不改验证状态 | 只写 `account_status` |
+| BR-PORT-013 停用立即吊销会话 | `revokeAllForEmployee`；会话解析时二次校验 |
+| BR-PORT-017 默认落地 Course | `DEFAULT_LANDING_MENU` |
+| BR-PORT-018 显示名取邮箱 @ 前缀 | `displayNameFromEmail` |
+| PORT-EDT-006 受保护管理员不可降级/停用 | 服务层 + 数据库触发器双保护 |
+| PORT-ACT-003 激活链接 48h / 单次 | `ACTIVATION_TOKEN_HOURS`、`consumeOnce`（条件更新） |
+| PORT-SEC-006 令牌不可预测 / 单次 | 32 字节随机 + HMAC 落库 + 条件更新消费 |
+
+## 5. 安全设计要点
+
+- 会话 Cookie：httpOnly + SameSite=Lax + 生产态 Secure
+- 双重超时：绝对 12h（`expires_at`）+ 空闲 30min（`last_seen_at`）
+- 登录失败、邮箱检查、重发邮件、改密均有限流（固定窗口内存实现）
+- 审计事件表带 CHECK 约束，禁止写入形如 `password=`/`token=` 的明文
+- 忘记密码对外始终返回同一结果，避免账号枚举
+
+## 6. 已知限制（须在验收时确认）
+
+| 限制 | 影响 | 处置建议 |
+|---|---|---|
+| 限流为单实例内存实现 | 多实例部署时限流失效 | 上线前换共享存储（Redis/DB） |
+| 邮件投递只有 console adapter | 生产态返回 `NOT_CONFIGURED`，不会伪装成功 | 接入 SES/SMTP 后再验收邮件链路 |
+| PRD §8 原型图以 .docx 内嵌图片存在，仓库内 `md_assets/` 缺失 | 无法逐像素对齐原型 | 由用户提供 Figma/截图或补齐 `md_assets/` |
+| Figma MCP 在本机未注入 agent 工具 | 无法读取设计上下文 | 见 `docs/AI_Collaboration_Log.md` 记录 |
+| 页面样式为按 PRD 描述自建，非设计稿还原 | 视觉细节需人工调整 | 设计稿到位后重做样式层 |
+
+## 7. 验收方式
+
+```bash
+cd backoffice
+npm run typecheck && npm run test:unit && npm run build
+```
+
+人工验收（浏览器操作由用户执行）：
+
+1. 无会话访问 `/en-GB/course` → 跳转 sign-in
+2. 非 Admin 直接输入 `/en-GB/settings/employee-account` → 无权提示
+3. 非 Admin 直接输入 `/zh-CN/knowledge`（如 Operation Admin）→ 无权提示
+4. 停用某员工后其已有会话立即失效
+5. 激活链接二次使用 → 提示链接无效
+6. 切换语言后 URL、页面状态保持不变

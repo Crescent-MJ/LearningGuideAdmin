@@ -698,3 +698,30 @@
 - **验证**：grep 确认无 Docker/Monorepo 残留；仓库最终 6 文件
 - **Git**：main 提交 `0a76321` 已推送（直连被重置，走代理 127.0.0.1:18081 成功）
 - **下一步**：Phase 1（已完成，见上条）
+
+---
+
+## 2026-10-22 ~ BackOffice Portal P0 首个版本（Next.js 全新应用）
+
+- **任务**：按 `docs/Learning_Guide_BackOffice_Portal_PRD_v1_1_EN_UK.md` 全新开发 BackOffice Portal P0，覆盖登录、激活、忘记/重置/改密、全局导航、员工账号管理、Bootstrap Admin、RBAC 与中英双语
+- **用户拍板**：① 分支 `feature/backoffice-portal`；② 新应用目录 `backoffice/`；③ 技术栈 Next.js 15 App Router + React 19 + TS strict + PostgreSQL(pg)；④ `client/`、`server/` 一律不改（"不要改纯 node.js 的"按最保守处理）；⑤ 实现基准文档新建 `docs/BackOffice_Portal_Implementation.md`；⑥ 暂时忽略 Figma，按 PRD 原型图描述实现
+- **变更清单**：
+  - 新增 `backoffice/`：Next.js 应用（页面 + API 同仓），含 `components/`、`contracts/`、`modules/`、`repositories/`、`db/migrations/`、`messages/`、`lib/`、`scripts/`、`tests/`
+  - 新增 `docs/BackOffice_Portal_Implementation.md`：范围映射、分层边界、规则落点、已知限制、验收步骤
+  - 新增 `backoffice/db/migrations/0001_backoffice_portal.sql`：employees / employee_sessions / verification_tokens / audit_events / employee_ui_preferences + bootstrap 保护触发器
+  - 修改 `.gitignore`：补 `.next/`、`out/`、`next-env.d.ts`
+- **关键决策**：
+  - 数据库迁移采用 `db/migrations/*.sql` 顺序执行（与 Next.js + pg 栈一致）；Admin 旧规则里的 Prisma Migrate 仅适用于既有 `server/`，差异记录在实现基准 §2.1；若领导要求改 Prisma，只需重做 `repositories/` + `db/` 两层
+  - 密码哈希用 `node:crypto` scrypt（每账号独立盐），零外部依赖
+  - 会话令牌与一次性令牌落库只存 HMAC；一次性令牌用条件更新实现"并发只有一个成功"
+  - 忘记密码对外返回一致结果，避免账号枚举
+  - 邮件投递未配置 provider 时返回 `NOT_CONFIGURED`，不把未投递报成成功
+- **Figma 相关结论（供后续复用）**：
+  - 官方 Remote MCP 已在 Cursor 连接成功（`Local: Connected`，43 tools / 122 resources）
+  - 但 agent 会话拿不到 figma 工具 schema，真实调用返回 `ToolUnavailable: the figma MCP server exposes 0 tools to this agent turn`（见 `docs/design/674-1186.metadata.error.json`）
+  - 同机 Origin MCP 的 32 个工具同样缺失，判定为 Cursor 侧工具注入问题，与文件权限无关
+  - 另一限制：本环境无法读取磁盘 `.png`（`Read` 报 `.png file not supported`），但**对话中粘贴的截图可以读取**
+  - 可行替代：① Figma REST API + PAT（返回纯 JSON，可完整解析）；② 用户截图贴进对话
+- **自测证据**：`npx tsc --noEmit` 通过；`npm run lint` 0 warning；`npm run test:unit` 19/19 通过；`npm run build` 成功（22 条路由）
+- **待办**：`docs/design/*.json` 为排障产物，交付前清理或加入 `.gitignore`；`backoffice/.env.local` 需按 `.env.example` 补齐后执行 `npm run db:migrate` + `bootstrap:admin`
+
