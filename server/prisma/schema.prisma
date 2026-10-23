@@ -54,12 +54,15 @@ model Page {
   id          String  @id @default(uuid())
   courseId    String
   course      Course  @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  // Portal lesson.id（2026-10-22 新增）：标题同步的稳定匹配键；此前同步的页面可为空
+  externalId  String?
   title       String // 原 Lesson 标题（md 文件标题）
   contentMd   String  @db.Text // 合并后的 Markdown：各原 Page 以 `# {Page标题}` 为 H1 拼接（Lesson.title 不入内容）
   sectionTags Json? // H1-H6 级标签映射：{ "h{n}-slug": ["tag1"] }（2026-10-16：移除页面级 tags）
   sortOrder   Int
   syncState   SyncState @default(SYNCED) // 外部源同步状态（§3.2.2）
 
+  @@unique([courseId, externalId])
   @@index([courseId, sortOrder])
 }
 

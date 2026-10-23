@@ -17,6 +17,11 @@ interface HeadingInfo {
   text: string
 }
 
+/** 目录缩进（2026-10-22）：Page 行左侧呼吸空间；Heading 按 H1-H6 逐级缩进 */
+const PAGE_INDENT = 6
+const HEADING_BASE_INDENT = 28
+const HEADING_LEVEL_STEP = 12
+
 /** 解析 markdown 提取 H1-H6（用于 TOC，2026-10-19 由 H1/H2/H3 扩展） */
 function parseHeadings(contentMd: string): HeadingInfo[] {
   const headings: HeadingInfo[] = []
@@ -121,15 +126,17 @@ export function CourseTree({ keyword }: { keyword: string }) {
           const titleMatch = p.title.toLowerCase().includes(kw)
           const headings = parseHeadings(p.contentMd)
           // 搜索口径（§3.2.1，2026-10-19）：匹配 Page 标题 + 全部 Heading（不含正文）。
-          // 标题命中→显示该页全部 Heading；仅 Heading 命中→只显示匹配的 Heading；无关键字→全部。
+          // 标题命中→显示该页全部 Heading；仅 Heading 命中→只显示匹配的 Heading；无关键字→全部 H1-H6。
           const visibleHeadings = !kw
             ? headings
             : titleMatch
               ? headings
               : headings.filter((h) => h.text.toLowerCase().includes(kw))
           if (kw && !titleMatch && visibleHeadings.length === 0) return []
-          const headingNodes = visibleHeadings.map((h) => ({
-            key: `heading:${course.id}:${p.id}:${h.level}:${h.text}`,
+
+          // index 用于区分同层级同文本的重复 Heading，避免 Tree key 冲突
+          const headingNodes: TreeDataNode[] = visibleHeadings.map((h, index) => ({
+            key: `heading:${course.id}:${p.id}:${h.level}:${index}:${h.text}`,
             title: h.text,
             isLeaf: true,
             _level: h.level,
@@ -175,13 +182,17 @@ export function CourseTree({ keyword }: { keyword: string }) {
     if (typeof key !== 'string') return
     if (key.startsWith('page:')) {
       const [, courseId, pageId] = key.split(':')
-      void selectPage(courseId, pageId)
+      // 2026-10-22 修复：点击当前已选 Page 只做展开/收起，不重新 selectPage。
+      // 否则会重置 draft 并触发编辑器 replaceBlocks，反复操作会出现重复 Heading。
+      if (courseId !== selectedCourseId || pageId !== selectedPageId) {
+        void selectPage(courseId, pageId)
+      }
     } else if (key.startsWith('heading:')) {
-      // heading:courseId:pageId:level:text
+      // heading:courseId:pageId:level:index:text
       const parts = key.split(':')
       const courseId = parts[1]
       const pageId = parts[2]
-      const heading = parts.slice(4).join(':')
+      const heading = parts.slice(5).join(':')
       // 跨文件：先切换到目标页面，再滚动到 heading
       if (pageId !== selectedPageId) {
         void (async () => {
@@ -377,15 +388,27 @@ export function CourseTree({ keyword }: { keyword: string }) {
             const canDropHere =
               isPage && dragEnabled && !!draggingId && draggingId !== pid
             const isDragging = isPage && draggingId === pid
-            // heading 字体大小按层级递减
-            const headingFontSize =
-              level === 1 ? tokens.fontSize.md : level === 2 ? tokens.fontSize.sm : tokens.fontSize.xs
+            // 2026-10-22：Heading 字号不随层级变小，统一与 Page 一致
+            const headingLevel = isHeading ? Math.max(1, Math.min(6, level ?? 1)) : 0
+            const headingFontSize = tokens.fontSize.md
+            // 缩进：Page 左侧留呼吸空间；Heading 按 H1-H6 逐级缩进
+            const paddingLeft = isPage
+              ? PAGE_INDENT
+              : isHeading
+                ? HEADING_BASE_INDENT + (headingLevel - 1) * HEADING_LEVEL_STEP
+                : 0
             return (
               <div
+                className="course-tree-row"
                 style={{
+                  position: 'relative',
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
+                  width: '100%',
+                  minWidth: 0,
+                  boxSizing: 'border-box',
+                  paddingLeft,
                   opacity: isDragging ? 0.4 : 1,
                   boxShadow: isDropTarget
                     ? dropTarget!.pos === 'before'
@@ -438,11 +461,30 @@ export function CourseTree({ keyword }: { keyword: string }) {
                     : undefined
                 }
               >
+                {/* Heading 引导线：H2-H6 显示祖先层级竖线（2026-10-22） */}
+                {isHeading &&
+                  headingLevel > 1 &&
+                  Array.from({ length: headingLevel - 1 }, (_, i) => (
+                    <span
+                      key={`guide-${i}`}
+                      aria-hidden="true"
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        bottom: 0,
+                        left: HEADING_BASE_INDENT + i * HEADING_LEVEL_STEP - 6,
+                        width: 1,
+                        background: tokens.color.border,
+                        pointerEvents: 'none',
+                      }}
+                    />
+                  ))}
                 <span
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: tokens.spacing.xs + 2,
+                    flex: 1,
                     minWidth: 0,
                     fontSize: isHeading
                       ? headingFontSize
@@ -491,11 +533,11 @@ export function CourseTree({ keyword }: { keyword: string }) {
                     <span
                       style={{
                         display: 'inline-block',
+                        flexShrink: 0,
                         width: 4,
                         height: 4,
                         borderRadius: '50%',
                         background: tokens.color.text.tertiary,
-                        marginLeft: tokens.spacing.sm,
                       }}
                     />
                   ) : null}
@@ -503,6 +545,11 @@ export function CourseTree({ keyword }: { keyword: string }) {
                     <Tooltip title="该节点与外部源不同步，不会作为 AI Tutor 知识库使用">
                       <span
                         style={{
+                          display: 'block',
+                          minWidth: 0,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
                           color: tokens.color.text.disabled,
                           fontStyle: 'italic',
                         }}
@@ -513,6 +560,8 @@ export function CourseTree({ keyword }: { keyword: string }) {
                   ) : (
                     <span
                       style={{
+                        flex: 1,
+                        minWidth: 0,
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
@@ -522,7 +571,7 @@ export function CourseTree({ keyword }: { keyword: string }) {
                     </span>
                   )}
                 </span>
-                <span style={{ display: 'flex', alignItems: 'center', gap: tokens.spacing.xs }}>
+                <span style={{ display: 'flex', alignItems: 'center', flexShrink: 0, gap: tokens.spacing.xs }}>
                   {isPage && (
                     <RightOutlined
                       style={{

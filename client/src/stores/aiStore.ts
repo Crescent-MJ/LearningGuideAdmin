@@ -46,6 +46,8 @@ interface AiState {
 
   init: () => Promise<void>
   selectCourse: (courseId: string) => Promise<void>
+  /** 重新拉取当前课程的配置与 Release 列表（进入 AI Tutor 时刷新，避免 Release 列表过期） */
+  refreshActiveCourse: () => Promise<void>
   setMode: (mode: AiMode) => Promise<void>
   patchForm: (patch: Partial<AiForm>) => void
   save: () => Promise<boolean>
@@ -132,8 +134,40 @@ export const useAiStore = create<AiState>((set, get) => ({
       if (p.mode === 'LECTURE' || p.mode === 'SOCRATIC') templates[p.mode] = p
     }
     set({ courses, models, templates })
-    if (courses.length > 0 && !get().selectedCourseId) {
+    const currentId = get().selectedCourseId
+    if (currentId && courses.some((course) => course.id === currentId)) {
+      // 从 Knowledge 模块切回 AI Tutor 时 store 仍然存活，必须重新拉取当前课程的
+      // config / Release 列表，否则新建的 Release 不会出现在版本下拉中。
+      await get().refreshActiveCourse()
+    } else if (courses.length > 0) {
       await get().selectCourse(courses[0].id)
+    }
+  },
+
+  async refreshActiveCourse() {
+    const { selectedCourseId } = get()
+    if (!selectedCourseId) return
+    try {
+      const [config, releases] = await Promise.all([
+        aiApi.getConfig(selectedCourseId),
+        knowledgeApi.listReleases(selectedCourseId),
+      ])
+      if (get().isDirty()) {
+        // 有未保存的配置修改：只刷新版本列表与配置元数据，不覆盖表单。
+        set({ config, releases, error: null })
+      } else {
+        const { mode, templates } = get()
+        const form = buildForm(config, templates, mode)
+        set({
+          config,
+          releases,
+          form,
+          initialForm: { ...form },
+          error: null,
+        })
+      }
+    } catch (e) {
+      set({ error: (e as Error).message })
     }
   },
 

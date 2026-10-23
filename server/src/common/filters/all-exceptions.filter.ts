@@ -40,7 +40,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
         code = 'VALIDATION_ERROR';
         message = '文件大小超过 15MB 限制';
       } else {
-        code = this.mapHttpStatusToCode(status);
+        // 允许业务异常通过 { code, message } 指定错误码（如 CONTENT_SYNC_DISABLED）
+        code = this.extractHttpExceptionCode(exception) ?? this.mapHttpStatusToCode(status);
         message = this.extractHttpExceptionMessage(exception);
       }
     } else if (exception instanceof Prisma.PrismaClientKnownRequestError) {
@@ -90,6 +91,16 @@ export class AllExceptionsFilter implements ExceptionFilter {
           ? 'BUSINESS_ERROR'
           : 'INTERNAL_ERROR';
     }
+  }
+
+  /** 从 HttpException 响应体提取业务错误码（仅接受字符串 code） */
+  private extractHttpExceptionCode(exception: HttpException): string | undefined {
+    const res = exception.getResponse();
+    if (res && typeof res === 'object') {
+      const code = (res as { code?: unknown }).code;
+      if (typeof code === 'string' && code.length > 0) return code;
+    }
+    return undefined;
   }
 
   /** 从 HttpException 响应体提取安全消息（字符串或校验消息数组），不回显原始对象 */

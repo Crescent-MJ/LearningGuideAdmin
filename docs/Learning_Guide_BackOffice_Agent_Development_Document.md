@@ -214,12 +214,13 @@ model AiChatSession {
 
 初始化数据库后，必须插入以下默认数据：
 
-**PromptTemplate 默认数据：**
+**PromptTemplate 默认数据（2026-10-23 起改为独立文件源）：**
 
-| id | mode | systemPrompt | welcomeMsg | isDefault |
-|----|------|-------------|------------|-----------|
-| lecture-default | LECTURE | "你是一名讲师型助手，擅长用结构化方式解释内容。请基于提供的课程资料，给出清晰、有条理的讲解。" | "你好！我是你的学习助手。请选择一个课程，我将根据课程内容为你讲解。" | true |
-| socratic-default | SOCRATIC | "你是一名苏格拉底式引导助手。不要直接给出完整答案，而要通过提问帮助用户自己得出结论。将答案拆解成一系列反问和引导性问题，逐步启发用户。" | "你好！让我通过提问来帮助你深入学习。请选择一个课程开始。" | true |
+- System Prompt：`server/src/ai/prompts/lecture.md`、`server/src/ai/prompts/socratic.md`
+- Welcome Message：`server/src/ai/prompts/welcome.yaml`（按 Lecture/Socratic × `zh-CN`/`en-GB` 维护）
+- 同步命令：`npm run prompts:sync`（upsert `lecture-default` / `socratic-default`，不触碰课程级覆盖）
+- 落库口径：`PromptTemplate.welcomeMsg` 存 `zh-CN` 供后台展示；学员端 welcome 按 `locale` 读取文件对应语言
+- 欢迎语口径：课程已在进入 AI Tutor 前选定，默认文案不再提示“请选择一个课程”
 
 ---
 
@@ -276,32 +277,35 @@ Knowledge System 是系统的主界面，采用「顶部整宽 Tab 栏 + 下方�
 > **设计改拍（2026-10-14）**：原「全量强制覆盖」语义改为**非破坏性外部源接管模型**。外部源是课程主数据（master），本地在同步结果上做修改；再次同步**绝不覆盖或丢失本地内容**，过期内容以「灰度失效」标记交用户处置。
 >
 > **2026-10-16 扁平化改拍**：外部源仍为 Course→Lesson→Page 三级，本地为 Course→Page 两级。同步时将外部一个 Lesson 映射为本地一个 Page（contentMd = `# {Lesson.title}` + 各外部 Page 以 `# {Page.title}` 为 H1 拼接）。
+>
+> **2026-10-22 改拍（Portal 对接，仅标题同步）**：外部源从 Mock fixture 切换为 LearningGuidePortal 已发布课程目录（`GET /api/integration/catalogue`，服务间 `X-API-Key`）。本期**只同步课程标题与 lesson（Page）标题，不读写课程正文**；本地已有 `contentMd` 保持不变。课程匹配键 `Course.externalId = Portal course.slug`，页面匹配键 `Page.externalId = Portal lesson.id`（同日新增字段）。
 
-**同步目标选取**：Sidebar 顶部为**外部课程选择器**（下拉列出外部源课程，带状态）。**选中即切换、无锁定机制**：切换目标前自动 `flushSave` 落盘当前草稿，树与编辑器随之切到新目标课程，并**自动选中该课程上次编辑的页面**。未选中时两个 Sync 按钮禁用。原「新建课程」入口**彻底移除**——所有课程来自外部源同步。
+**同步目标选取**：Sidebar 顶部为**外部课程选择器**（下拉列出 Portal 已发布课程，带状态）。**选中即切换、无锁定机制**：切换目标前自动 `flushSave` 落盘当前草稿，树与编辑器随之切到新目标课程，并**自动选中该课程上次编辑的页面**。未选中时同步按钮禁用。原「新建课程」入口**彻底移除**——课程身份由 Portal 同步。
 
-**两个按钮**：
+**按钮**：
 
 | 按钮 | 接口 | 行为 |
 |------|------|------|
-| Sync Structure Only | POST /api/sync/structure `{ externalId }` | 仅同步目录树结构（页面标题、排序、增删节点），不写入正文 |
-| Sync Structure & Course | POST /api/sync/all `{ externalId }` | 同步结构 + 内容（非破坏性，见下表） |
+| 从 Portal 同步标题 | POST /api/sync/structure `{ externalId }` | 同步课程标题 + 课时标题（Page.title），不写入/覆盖正文 |
 
-**同步算法（按 Lesson.title 匹配外部 Lesson ↔ 本地 Page）**：
+> `POST /api/sync/all` 保留路由但返回 400 `CONTENT_SYNC_DISABLED`；2026-10-22 起正文同步禁用，只允许标题同步。
+
+**同步算法（按 externalId 匹配，标题兜底）**：
 
 | 情形 | 行为 |
 |------|------|
-| 外部有、本地无 | 新增 Page（contentMd 按上述规则拼接）；标题冲突按 `标题-new` 递增 |
-| 两边都有、合并后 contentMd 一致 | 不动；全部一致返回 `unchanged` |
-| Lesson.title 一致但合并 contentMd 变了 | 本地 Page 整体 `syncState=STALE` 并改名为 `{title} (old)`；新建 Page 装入外部最新合并内容 |
-| 本地有、外部无 | 本地 Page `syncState=STALE`，交用户删除 |
+| 课程在本地不存在 | 新建 Course（title = Portal title，externalId = Portal slug） |
+| 课程已存在 | 仅当标题不同时更新 Course.title |
+| Page 按 `Page.externalId` 命中 | 仅当标题不同时更新 Page.title，正文完全不动 |
+| Page 未命中但标题相同 | 回填 `Page.externalId`，并按需更新标题 |
+| 本地无该 lesson | 新增空 Page（contentMd = ''，sortOrder 按 Portal 顺序） |
+| Portal 删除 lesson | 本期不标记 STALE，避免误伤本地正文；后续内容同步阶段再处理 |
 
-**方案 C：sectionTags 迁移（2026-10-16 拍板）**：同步新建 Page 时，若对应 STALE 旧 Page 存在 `sectionTags`，按带层级前缀的 heading slug（`h{n}-slug`，小写、空格转 `-`、去特殊字符）匹配迁移——slug 相同的 tags 搬到新 Page，slug 不存在的（heading 文本改了）丢弃。
+**STALE（灰度失效）节点**：外部内容阶段保留原有语义；本期标题同步不产生新的 STALE 节点。
 
-**STALE（灰度失效）节点**：树中置灰 + Tooltip。AI Tutor 快照过滤 STALE 节点。
+**响应**：`{ created, updated, staleMarked, unchanged }` 变更摘要。
 
-**响应**：`{ created, staleMarked, unchanged }` 变更摘要。
-
-> **Mock 实现**：外部源为后端内存 fixture（`server/src/sync/demo-fixtures.ts`），真实外部 API 接入后替换数据源、同步算法不变。
+> **外部源实现**：`server/src/sync/portal-source.service.ts`。需要 `PORTAL_API_BASE_URL` 与 `PORTAL_API_TOKEN`；Portal 未配置 Token 时接口返回 503，避免课程目录裸奔。e2e 通过 `overrideProvider(PortalSourceService)` 注入假数据源。
 
 #### 3.2.3 上传文档建页（2026-10-15 实现落地；同日按用户设计稿改为两步弹窗「Upload and Parse」）
 
@@ -526,7 +530,8 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
   - **存储**：`Course.aiTutorOnline`（§2，默认 false；2026-10-20 由 `CourseAiConfig.online` 搬移而来，保持课程级语义）。
 - **「管理所有 online」入口**：位于 "Change Course" 下拉面板**最下侧固定一行链接**；点击后关闭下拉并打开管理弹窗。
 - **管理弹窗**：表格展示全部 AI Tutor（Course），列 = `AI Tutor 名称` / `Online 状态`；支持**按名称排序、按 Online 状态排序**（点列头切换升降序）；**右上角搜索框按名称过滤**。排序与过滤均在**前端本地**完成（数据源 `GET /api/ai/tutors`，数据量为课程量级）。每行提供开关，**点即改即存**（同上接口）；当改动的正是当前选中课程时，同步更新左侧卡片标题行的 Online 开关。
-- **预留接口**：`GET /api/user/ai-tutors`（用户侧读取 Online AI Tutor 列表）本次**仅预留路由与 Service 方法**（不实现业务逻辑），供后续学生端接入（§5.2）。
+- **用户侧接口（2026-10-22 实现）**：`GET /api/user/ai-tutors` 返回所有已配置 `externalId` 的课程，每条含 `online`（课程开关）与 `available`（= online && 存在 `currentReleaseId`）。Portal 仅在 `available=true` 时展示「询问 AI 导师」入口；**接口不做缓存**，Online 开关切换后下一次请求立即生效。
+- **学员端欢迎语（2026-10-22 新增，2026-10-23 支持 locale）**：`GET /api/user/ai-tutors/:externalId/welcome?locale=zh-CN|en-GB` 返回该课程在 `LECTURE` / `SOCRATIC` 两种模式下生效的 `{ lecture, socratic }` 欢迎语（课程自定义 > 课程绑定模板 > 文件默认值，只读 `currentReleaseId`）；仅返回 welcome 文本，不返回 System Prompt。课程不存在 / 未开放 / 无上线版本分别返回 404 / 403 / 409。
 
 ### 4.3 右侧对话面板
 
@@ -536,6 +541,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
   - 点击 versionTag 展开下拉：按发布时间**倒序**列出该 Course 全部 Release，**上线版本行**显示绿色 `Live` 徽章、当前所选项高亮；点某行 = 切换 AI Tutor 测试所用 Release（**持久化到后端 `Course.aiTestReleaseId`**）。
   - **Set Live**：仅把 `Course.currentReleaseId` 指向所选 Release，**不重建/覆盖 Page 草稿**（§3.4.4）；成功后左徽章由 `Testing` 切为 `Live`。
   - 切换 Release 时若 AI 配置有未保存改动：**弹未保存改动提醒**（保存 / 取消；§4.3.6）。
+  - **进入 AI Tutor 时刷新（2026-10-23 修复）**：模块切换不会清空 `aiStore`，因此每次进入 AI Tutor 都重新拉取当前课程的 `config` 与 Release 列表；在 Knowledge Pages 新建的 Release 会立即出现在版本下拉中。若配置面板存在未保存改动，只刷新列表与配置元数据，**不覆盖表单内容**。Create Release 仍只生成快照，Live 指针只由 Set Live 变更。
 - 中间：Lecture / Socratic 模式切换（**胶囊型分段控件**，样式见下方注记）
 - 右侧：+ New Chat 按钮（**主色实心主按钮**，样式见下方注记）
 
@@ -613,7 +619,23 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 > `history` 为可选字段（2026-10-14 补充）：前端把 localStorage 会话的最近若干条随请求携带，后端仅取最近 10 条拼入多轮上下文，保证对话连续性（对话本身仍不落库）。
 
-响应：Stream（Server-Sent Events 格式）
+**POST /api/user/ai/chat-stream（2026-10-22 新增，Portal 学员端专用）**
+
+请求体：
+
+```json
+{
+  "externalCourseId": "portal-course-slug",
+  "message": "string",
+  "mode": "LECTURE | SOCRATIC",
+  "locale": "en-GB | zh-CN",
+  "history": [{ "role": "user | assistant", "content": "string" }]
+}
+```
+
+> 与后台 `/api/ai/chat-stream` 完全隔离：`externalCourseId` 按 `Course.externalId` 解析；**必须** `aiTutorOnline=true`；知识库只读 `Course.currentReleaseId`，**禁止**使用 `aiTestReleaseId`；不接受客户端传入 `releaseId`、`systemPrompt`、`knowledgePack` 等字段。
+
+响应：Stream（Server-Sent Events 格式，帧格式与后台接口一致：`{delta}` / `{done}` / `{error}`）
 
 #### 4.4.2 核心处理逻辑
 
@@ -623,7 +645,7 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 4. **组装 Prompt**：
    - 获取对应模式的 PromptTemplate（优先自定义，其次默认）
    - 拼接：`System Prompt` + `[CONTEXT_START]` + 课程资料 + `[CONTEXT_END]` + 用户消息
-   - Socratic 模式额外注入引导指令：`"你是一个苏格拉底式的引导者。永远不要直接给出最终答案。将答案拆解成一系列反问和引导性问题，逐步启发用户自己得出结论。"`
+   - 2026-10-22 起不再追加固定苏格拉底指令：默认 Socratic 模板（MixSocratic v8）已包含完整教学规则，运行时仅按学员 `locale` 追加语言指令。
 5. **代理转发**：经 Provider 适配器（策略模式，首批接入 OpenRouter，OpenAI 兼容接口，2026-10-14 §12 事项 #2 拍板）调用实际 API（流式）
 6. **流式返回**：将 LLM 的流式 Chunk 以 SSE 格式转发给前端
 7. **日志记录**：
@@ -686,11 +708,11 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | /api/sync/external-courses | 列出外部源课程（含同步状态：未同步/已同步/有更新），供选择器 |
-| POST | /api/sync/structure | 仅同步目录树结构，body `{ externalId }` |
-| POST | /api/sync/all | 同步结构+内容（非破坏性），body `{ externalId }` |
+| GET | /api/sync/external-courses | 列出 Portal 已发布课程（含同步状态：未同步/已同步/有更新），供选择器 |
+| POST | /api/sync/structure | 同步课程标题 + 课时标题，body `{ externalId }`；正文不动 |
+| POST | /api/sync/all | 正文同步已禁用（2026-10-22）：返回 400 `CONTENT_SYNC_DISABLED` |
 
-> 同步语义详见 §3.2.2（外部源接管模型）。Mock 阶段外部源为后端内存 fixture；真实外部 API 接入（§12 事项 #4）后替换数据源。
+> 同步语义详见 §3.2.2。外部源为 Portal `GET /api/integration/catalogue`，需要 `PORTAL_API_BASE_URL` + `PORTAL_API_TOKEN`（服务间 `X-API-Key`）。DEV 下 Portal 的 `localhost` 属于 admin host，middleware 已显式放行 `/api/integration/`；若返回 3xx，KS 会提示检查地址与中间件配置。
 
 #### 5.1.5 文件上传（2026-10-15 新增；同日按 §3.2.3 弹窗设计改为仅转换不建页）
 
@@ -753,7 +775,9 @@ AI Tutor 是一个独立的功能板块，提供 AI 对话能力。其知识库�
 | PUT | /api/ai/config/:courseId/active-release | **设置测试所选 Release**：body `{ releaseId }` → 持久化 `Course.aiTestReleaseId`，返回最新 `AiConfigView`（2026-10-20 新增，§4.3.1） |
 | PUT | /api/ai/config/:courseId/online | 设置某 Course 的 Online 状态（开关即时生效，body `{ online: boolean }`，返回最新 AiConfigView；写 `Course.aiTutorOnline`；§4.2.6） |
 | GET | /api/ai/tutors | 列出全部 AI Tutor（Course）及名称 / Online 状态（读 `Course.aiTutorOnline`，供「管理所有 online」弹窗，§4.2.6） |
-| GET | /api/user/ai-tutors | **预留钩子**（用户侧读取 Online AI Tutor 列表；2026-10-20 拍板：仅预留路由与 Service 方法、不实现业务逻辑） |
+| GET | /api/user/ai-tutors | 用户侧读取 AI Tutor 可用性列表（2026-10-22 实现）：返回所有有 `externalId` 的课程，字段 `online` / `available`；无缓存 |
+| GET | /api/user/ai-tutors/:externalId/welcome?locale= | 用户侧读取某课程两种模式的欢迎语（2026-10-23 支持 locale）：返回 `{ lecture, socratic }`；默认模板按 locale 读取 `src/ai/prompts/welcome.yaml`，只读上线 Release，不返回 System Prompt |
+| POST | /api/user/ai/chat-stream | 用户侧流式对话（2026-10-22 新增）：body `{ externalCourseId, message, mode, locale, history }`；强制 Online + 只读 `currentReleaseId`（详见 §4.4.1） |
 
 > **边界**：Course 尚无任何 Release 时，`GET config` 返回模板默认值（`releaseId`/`releaseTag` 为 null、`isLive=false`）；此时 `PUT config`/`reset` 返回 400（无 Release 可绑定），前端提示「请先创建 Release」。
 >
@@ -971,6 +995,14 @@ AI_CONFIG_ENCRYPTION_KEY="0000...64位hex...0000"
 # 其他 Provider（按需启用，适配器预留）
 # DEEPSEEK_API_KEY="xxx"
 # ANTHROPIC_API_KEY="xxx"
+
+# Portal 课程目录同步（2026-10-22 新增，仅服务间调用）
+PORTAL_API_BASE_URL="http://localhost:3011"
+PORTAL_API_TOKEN="shared-service-token"
+
+# 服务间鉴权（可选；开启后所有 /api 请求需带 X-API-Key）
+AUTH_ENABLED=false
+AUTH_TOKEN=
 
 # 服务器配置
 PORT=3000

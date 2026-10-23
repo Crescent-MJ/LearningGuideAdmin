@@ -1,0 +1,17 @@
+# AI Tutor 默认欢迎语（2026-10-23）
+# - 仅在课程未配置 Welcome Message 覆盖时使用。
+# - 按模式（lecture / socratic）与语言（zh-CN / en-GB）分别维护。
+# - 修改后运行 `npm run prompts:sync` 同步到数据库；学员端按 locale 读取对应语言。
+# - 文案口径：课程已在进入 AI Tutor 前选定，不再提示“请选择课程”。
+
+lecture:
+  zh-CN: |
+    你好！我是本课程的 AI 导师。你可以问我课程中的概念、例子和难点，我会结合课程内容为你讲解。想从哪里开始？
+  en-GB: |
+    Hi! I'm your AI Tutor for this course. Ask me about key ideas, examples, or anything you find difficult, and I'll explain it in the context of the course. Where would you like to start?
+
+socratic:
+  zh-CN: |
+    你好！我是本课程的 AI 导师。我会通过提问陪你把问题一步步想清楚。你可以从任何疑问开始——你最先想弄明白的是什么？
+  en-GB: |
+    Hi! I'm your AI Tutor for this course. I'll help you think things through step by step by asking questions. Start with anything you're unsure about — what would you like to understand first?

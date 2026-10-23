@@ -74,6 +74,8 @@ export interface ExternalCourseStatus {
 
 export interface SyncSummary {
   created: number
+  /** 2026-10-22 标题同步新增：更新过的标题数（课程标题 + 课时标题） */
+  updated: number
   staleMarked: number
   unchanged: boolean
 }

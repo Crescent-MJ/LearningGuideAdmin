@@ -5,6 +5,154 @@
 
 ---
 
+## 2026-10-23 ｜ AI Tutor 进入时刷新 Release 列表（状态过期修复）
+
+- **任务（用户）**：在 Knowledge Pages 新建 Release 后，AI Tutor 仍停留在旧 Release 列表；切换 Course 再切回才更新。要求只修状态刷新。
+- **根因**：`aiStore` 为模块级单例，`App` 切换模块只卸载组件、不清空 store；`init()` 仅在 `selectedCourseId` 为空时调用 `selectCourse()`，因此切回 AI Tutor 不会重新拉取 `getConfig` / `listReleases`。
+- **用户拍板**：方案 A，只修状态更新，不自动切换测试版本或 Live 版本。
+- **变更清单**：
+  - `client/src/stores/aiStore.ts` 新增 `refreshActiveCourse()`：并行重拉 `getConfig` + `listReleases`
+  - `init()` 每次进入 AI Tutor 时刷新当前课程；课程已不存在则回退第一门课程
+  - 有未保存配置改动时只刷新 `config` / `releases`，不覆盖 `form`；无改动时同步重建表单
+  - 开发文档 §4.3.1 补充该刷新规则
+- **自测证据**：`npm run build`（tsc -b + vite build）通过；`npm run lint` 0 errors（4 条既有 warning）
+- **审查结论**：待 Review Agent 审查；UI 由用户手动验收
+- **Git**：尚未提交
+
+---
+
+## 2026-10-23 ｜ 默认 Prompt / Welcome 文件化 + 通用本课欢迎语
+
+- **任务（用户）**：① 重新设计默认 welcome（课程已选定，不再提示选择课程）；② 把默认 Lecture/Socratic Prompt 与 Welcome 从代码中独立出来，支持快速编辑。
+- **用户拍板**：① 通用本课导师文案（中英文两版）；② MD + YAML 组合；③ 编辑后手动执行同步命令；④ 保留后台课程级覆盖编辑。
+- **变更清单**：
+  - 新增 `server/src/ai/prompts/lecture.md`、`socratic.md`（原 `agents/` 草稿原样迁入，作为默认 Prompt 唯一来源）
+  - 新增 `server/src/ai/prompts/welcome.yaml`：Lecture/Socratic × `zh-CN`/`en-GB` 通用本课欢迎语
+  - 新增 `server/src/ai/prompt-defaults.ts`：读取并校验文件；`promptTemplateSeeds()` 供 seed/同步共用
+  - 新增 `server/src/ai/sync-prompts.ts` 与 `npm run prompts:sync`：只 upsert 两条默认模板，不触碰课程覆盖
+  - `prisma/seed.ts` 删除硬编码 Prompt 常量，改读文件
+  - `ai-config.service.ts`：学员 welcome 增加 locale；优先级为课程自定义 > 绑定模板 > 文件默认值
+  - `ai.controller.ts`：welcome 接口支持 `?locale=zh-CN|en-GB`
+  - `nest-cli.json`：构建时复制 `ai/prompts/*` 到 `dist/ai/prompts`
+  - 依赖：新增 `js-yaml`（已有传递依赖，显式声明）；新增 `@types/js-yaml` dev 依赖
+  - 修复 ts-node 运行：手写 `src/types/js-yaml.d.ts` 不会被 ts-node 默认加载（构建用 tsc 会加载），改为安装官方类型包并删除 shim
+  - 文档：§2.1、§4.2.6、接口表同步
+- **自测证据**：KS 全量单测 89 用例通过（含新增 3 条 welcome 优先级/locale 用例）；`npm run build` 通过且 `dist/ai/prompts` 三个文件已复制；`npm run prompts:sync` 执行成功，`lecture-default` / `socratic-default` 两条默认模板已写入新文案
+- **注意**：同步只 upsert 两条默认 PromptTemplate，不修改任何 CourseAiConfig 课程覆盖
+- **审查结论**：待 Review Agent 审查；UI 由用户手动验收
+- **Git**：尚未提交
+
+---
+
+## 2026-10-22 ｜ 学员端 AI Tutor 欢迎语接口（Portal AI Tutor 右侧抽屉）
+
+- **任务（用户）**：LearningGuidePortal 的 AI Tutor 弹窗需要展示 KnowledgeSystem 后台配置的 welcome 语；KS 现有学员接口只返回 `online/available`，不包含 welcome。
+- **用户拍板**：① 新增 `GET /api/user/ai-tutors/:externalId/welcome`（自定义优先、模板兜底、只读 `currentReleaseId`）；② welcome 为空时 Portal 不显示欢迎气泡，不回退本地文案。
+- **变更清单**：
+  - `server/src/ai/ai-config.service.ts`：新增 `resolveLearnerWelcome(externalId)`，返回 `{ lecture, socratic }`；课程不存在 / 未开放 / 无上线版本分别 404 / 403 / 409
+  - `server/src/ai/ai.controller.ts`：`UserAiController` 新增 `GET ai-tutors/:externalId/welcome`
+  - `server/src/ai/ai-config.service.spec.ts`：补 welcome 解析与三种状态码单测
+  - `docs/Learning_Guide_BackOffice_Agent_Development_Document.md`：§4.2.6 与接口表同步新端点
+- **自测证据**：`npx jest src/ai/ai-config.service.spec.ts --runInBand` 17 用例全通过
+- **审查结论**：待 Review Agent 审查（本次同时涉及 Portal 前端，UI 由用户手动验收）
+- **Git**：尚未提交
+- **下一步**：Portal 侧打开抽屉时调用该接口并渲染 welcome；welcome 为空则不展示气泡
+
+---
+
+## 2026-10-22 ｜ KS 目录栏 UI 调整（长标题省略 + H1-H6 层级 + 左移 + 收起把手）
+
+- **任务（用户）**：① 长 lesson 名称不出现横向滚动条，改为省略号且不影响搜索；② 目录栏按 H1-H6 展示，需先确认展示方式；③ lesson 行左移，拖拽区最左侧与目录栏对齐并留呼吸空间；④ 导航列收起把手更窄、更高，右侧不越过目录栏左边缘。
+- **用户拍板**：Heading 采用「缩进 + 引导线」；初始方案默认展示 H1-H3、H4-H6 收进「展开更多」。
+- **后续改拍（同日）**：取消 H4-H6「展开更多」，H1-H6 全部直接展示；Heading 字号不再随层级变小；修复重复展开/缩进导致目录与正文出现重复 Heading/tag 的 bug。
+- **变更清单**：
+  - `client/src/components/knowledge/CourseTree.tsx`：
+    - 新增 `PAGE_INDENT=6`、`HEADING_BASE_INDENT=28`、`HEADING_LEVEL_STEP=12`；Page 行左移，Heading 按 H1-H6 逐级缩进
+    - H2-H6 渲染祖先层级竖向引导线；H1-H6 全部展示，移除「展开/收起 H4-H6」节点
+    - Heading 字号统一为 `fontSize.md`，不再按层级递减
+    - Heading Tree key 加入 index，避免同层级同文本的重复 key
+    - 点击当前已选 Page 时不再调用 `selectPage`，只做展开/收起
+    - 标题行改为 `flex + minWidth:0 + ellipsis`，右侧 chevron/菜单 `flexShrink:0`
+  - `client/src/stores/knowledgeStore.ts`：`selectPage` 对「当前页 + 已有 draft」直接返回；并改为 `flushSave` 后重新读取 page，避免写回旧 `contentMd`
+  - `client/src/components/layout/Sidebar.tsx`：树容器改为 `overflowY:auto / overflowX:hidden`，消除横向滚动条
+  - `client/src/index.css`：Ant Tree 层级缩进归零（由 titleRender 接管）；Tree/TreeNode/content-wrapper/title 全部 `min-width:0`、`max-width:100%`，长文本省略
+  - `client/src/components/layout/MainLayout.tsx`：导航列收起把手 `22×48 → 14×72`，字号 16→12，右侧边缘停在 Sider padding 内
+- **重复 Heading 根因**：点击当前 Page 会同时触发 `selectPage`（重置 draft + 编辑器 `replaceBlocks`）和展开/收起；反复操作会叠加编辑器重载，导致目录与正文重复。已在 `handleSelect` 与 store `selectPage` 双重短路。
+- **自测证据**：`npm run build`（tsc -b + vite build）通过；`npm run lint` 0 errors（仅既有 warning）
+- **审查结论**：按用户要求不做浏览器自动化验证，UI 由用户手动验收。已存在的重复 Heading/tag 不会被自动删除，需要用户确认后再清理。
+- **Git**：尚未提交
+- **下一步**：用户手动验证 H1-H6 全量展示、字号一致、反复展开/收起不再产生重复 Heading，以及拖拽/收起把手尺寸
+
+---
+
+## 2026-10-22 ｜ 修复「无法同步 Portal 课程目录」（admin host 重定向 + 本地配置）
+
+- **任务（用户）**：KS 课程管理报「未配置 PORTAL_API_BASE_URL 或 PORTAL_API_TOKEN，无法同步 Portal 课程目录」，要求先讨论再开发。
+- **诊断结论**：
+  - KS `server/.env` 缺少 `PORTAL_API_BASE_URL` / `PORTAL_API_TOKEN`，请求发出前即被 `PortalSourceService` 拒绝；
+  - Portal DEV 下 `localhost` / `127.0.0.1` 属于 admin host，`/api/integration/catalogue` 不在 admin 白名单，middleware 返回 307 到 `/en-GB/backoffice`；
+  - Portal `.env.local` 缺少 `PORTAL_INTEGRATION_TOKEN`，即使放行也会返回 503。
+- **用户拍板**：按方案 A 执行——修 Portal admin 白名单 + 配置共享 Token，不采用 KS 直读 Portal 数据文件的方式。
+- **变更清单**：
+  - `LearningGuidePortal-dev/services/adminHost.ts`：`isAdminAllowedPath` 放行 `/api/integration/`（接口自身仍校验 Token）
+  - `LearningGuidePortal-dev/tests/unit/admin-host.test.ts`：新增 admin host 下 `/api/integration/catalogue` 应 allow 的断言
+  - `KnowledgeSystem/server/src/sync/portal-source.service.ts`：fetch 增加 `redirect: 'manual'`；3xx 明确提示检查 `PORTAL_API_BASE_URL` 与 Portal 中间件，避免把后台 HTML 当 JSON
+  - `KnowledgeSystem/server/src/sync/portal-source.service.spec.ts`（新增 3 例）：缺配置、307、正常解析与 sections 扁平化
+  - 本地 `.env`（均已 gitignore，不提交）：Portal 增加 `PORTAL_INTEGRATION_TOKEN=dev-shared-token`、`KS_TUTOR_BASE_URL=http://localhost:3000`、`KS_TUTOR_API_KEY=`；KS 增加 `PORTAL_API_BASE_URL=http://localhost:3011`、`PORTAL_API_TOKEN=dev-shared-token`
+- **自测证据**：
+  - Portal `GET /api/integration/catalogue`：带 Token **200**（返回 3 门已发布课程及课时标题）；不带 Token **401**
+  - KS `npm test -- --runInBand` **14 suites / 84 tests** 通过；`npm run test:e2e -- --runInBand` **5 suites / 72 tests** 通过；`tsc --noEmit` 通过
+  - Portal `tests/unit/admin-host.test.ts` **4 tests** 通过；`tsc --noEmit` 通过
+- **审查结论**：未调用 test_agent（环境无该工具）；两处根因均已用真实 HTTP 探测与自动化测试验证。
+- **运行环境修复**：KS 重启时报 `EADDRINUSE :::3000`，排查发现同时存在两个 `nest start --watch` watcher，旧主进程 93312 占着 3000。已停止重复 watcher（91852/81092）、旧主进程（93312/99156）和残留 watcher（74980/80772），重新启动单一 `npm run start:dev`（PID 88212）。随后按用户要求停止该后台实例（88212 及其 watcher），3000 端口已释放；当前只保留用户自己的 watcher（58616/96100）。
+- **自测证据（追加）**：`/api/sync/external-courses` 返回 **200**，内容为 `epicureanism` / `stoicism` / `quintus-horatius-flaccus` 三门课程，证明 KS 已读取新 `.env` 并成功访问 Portal catalogue。
+- **Git**：尚未提交
+- **下一步**：在 KS 课程管理点「从 Portal 同步标题」，再配置 OpenRouter Key / Release / Online
+
+---
+
+## 2026-10-22 ｜ Portal「询问 AI 导师」接入 KS（课程映射 + 标题同步 + Online 隐藏入口）
+
+- **任务（用户）**：LearningGuidePortal 课程页的「询问 AI 导师」改为通过 API 接入 KnowledgeSystem；只同步课程标题与 lesson 标题，内容暂不同步；Online 跟课程走；offline 时隐藏入口；状态要求立即生效。
+- **用户拍板**：① KS 课程管理只同步课程标题 + 课时标题，正文不同步；② KS 不可达时 Portal 隐藏入口；③ Online 状态不做缓存，切换后下一次请求立即生效；④ 允许开始开发，遇问题先对接再继续。
+- **变更清单**：
+  - `server/prisma/schema.prisma` + `migrations/20261022120000_add_page_external_id`：新增 `Page.externalId`（Portal lesson.id，可空，复合唯一），作为标题同步稳定匹配键
+  - `server/src/sync/portal-source.service.ts`（新增）：从 Portal `GET /api/integration/catalogue` 拉取已发布课程/课时标题；`PORTAL_API_BASE_URL` + `PORTAL_API_TOKEN`，服务间 `X-API-Key`
+  - `server/src/sync/sync.service.ts`：改为标题同步（Course.title / Page.title / externalId 回填），正文、sectionTags、sortOrder、syncState 不动；新增 `updated` 摘要；`POST /api/sync/all` 返回 400 `CONTENT_SYNC_DISABLED`
+  - `server/src/sync/sync.module.ts`、`sync.controller.ts`、`client/src/components/knowledge/SyncButtons.tsx`、`client/src/stores/knowledgeStore.ts`、`client/src/api/knowledge.ts`、`client/src/components/layout/Sidebar.tsx`：同步目标改为 Portal，按钮收敛为「从 Portal 同步标题」，失败时在侧栏显示原因
+  - `server/src/ai/ai.controller.ts` + `dto/learner-chat-stream.dto.ts` + `sse-stream.ts`：新增 `POST /api/user/ai/chat-stream`；`GET /api/user/ai-tutors` 由 501 改为返回 `online` / `available`
+  - `server/src/ai/ai-chat.service.ts`：抽出 `run()` 统一日志；新增 `streamLearnerChat()`（externalId 解析、Online 强制、只读 `currentReleaseId`、忽略 `aiTestReleaseId`、按 locale 注入语言指令）；删除运行时固定 SOCRATIC_GUIDE
+  - `server/src/ai/ai-config.service.ts`：`listOnlineTutorsForUser()` 返回所有有 externalId 的课程及 `online` / `available`
+  - `server/src/ai/ai-chat-logger.ts`：日志新增 `channel`（admin / learner）
+  - `server/src/common/filters/all-exceptions.filter.ts`：允许 HttpException 携带业务 `code`（如 `CONTENT_SYNC_DISABLED`）
+  - Portal：新增 `services/ksTutorClient.ts`（无缓存状态查询 + SSE 转纯文本 + 超时/断开）；`app/api/ai-tutor/route.ts` 改为 KS BFF；新增 `app/api/integration/catalogue/route.ts`；`PreviewLessonView`/`ExplorationDialog` 隐藏 offline 入口；学习页/公开课页实时读取 `available`
+  - `.env.example`（两端）：新增 `KS_TUTOR_*` 与 `PORTAL_INTEGRATION_TOKEN`
+  - 文档：KS 开发文档 §3.2.2/§4.2.6/§4.4.1/§4.4.2/§5.1.4/§5.2/§8；Portal `docs/phase1/api-contracts.md`
+- **自测证据**：KS `npm test -- --runInBand` **13 suites / 81 tests** 通过；`npm run test:e2e -- --runInBand` **5 suites / 72 tests** 通过（含标题同步幂等、`CONTENT_SYNC_DISABLED`、学员端 Online/currentRelease/locale）；`npm run build` 通过；Portal `npx tsc --noEmit` 通过；`tests/unit/ks-tutor-client.test.ts` **5 tests** 通过；`subscribed-learning-route` + `text-preview-route` **2 tests** 通过
+- **审查结论**：本轮未调用 test_agent（当前环境无该工具），改用上述单元/集成/e2e 与 typecheck 验证；Portal 组件级 offline 隐藏暂无自动化组件测试框架，留给手动验证。
+- **Git**：尚未提交
+- **下一步**：① Portal `.env.local` 配 `KS_TUTOR_BASE_URL=http://localhost:3000`（KS 关闭 AUTH 时 `KS_TUTOR_API_KEY` 可留空）；② 两端配同一个 `PORTAL_INTEGRATION_TOKEN` / `PORTAL_API_TOKEN`；③ KS 配 `PORTAL_API_BASE_URL=http://localhost:3011`；④ KS 课程管理同步标题后为课程配置 OpenRouter Key、创建 Release、开 Online；⑤ 用户手动验证入口显示/隐藏与流式问答
+
+---
+
+## 2026-10-22 ｜ AI Tutor 默认提示词替换（Lecture v1 / MixSocratic v8）
+
+- **任务（用户）**：将 KnowledgeSystem 默认 LECTURE 与 SOCRATIC 提示词替换为 `agents/Leture_Prompt_v1.txt` 与 `agents/MixSocratic prompt_v8.txt` 的原文。
+- **用户拍板**：① 移除运行时 `ai-chat.service.ts` 追加的旧固定「苏格拉底式引导者」指令（与新 MixSocratic v8「事实题可直接回答」冲突）；② 改 `prisma/seed.ts` 并执行 `npx prisma db seed`，upsert 覆盖 `lecture-default` / `socratic-default`，不影响课程级自定义；③ 允许临时停止并重启 KS 开发服务以完成 Prisma Client 生成。
+- **变更清单**：
+  - `server/prisma/seed.ts`：新增 `DEFAULT_LECTURE_PROMPT`（765 字符）与 `DEFAULT_SOCRATIC_PROMPT`（15716 字符），`lecture-default` / `socratic-default` 的 update/create 均引用；`welcomeMsg` 保持不变
+  - `server/src/ai/ai-chat.service.ts`：删除 `SOCRATIC_GUIDE` 常量与 SOCRATIC 分支追加；保留学员侧 `LOCALE_INSTRUCTION`
+  - `docs/Learning_Guide_BackOffice_Agent_Development_Document.md`：§2.1 默认模板来源改为 seed 常量并注明 2026-10-22 替换；§4.4.2 第 4 步删除固定苏格拉底注入描述
+  - `server/src/ai/ai-config.service.spec.ts`：`listOnlineTutorsForUser` 用例由 501 改为实际返回断言
+  - `server/test/ai.e2e-spec.ts`：SOCRATIC 用例断言改为 `not.toContain('苏格拉底式的引导者')`；`GET /api/user/ai-tutors` 改为 200 + 字段形状
+  - `server/test/knowledge.e2e-spec.ts`：注入 fake `PortalSourceService`；`POST /api/sync/all` 断言 400 `CONTENT_SYNC_DISABLED`；`POST /api/sync/structure` 覆盖标题同步与幂等
+- **自测证据**：源文件字符数 lecture=765 / socratic=15716，与库内 `PromptTemplate.systemPrompt` 长度一致；`npm run build` 通过；`npm test -- --runInBand` **13 suites / 78 tests** 全通过；`npm run test:e2e -- --runInBand` **5 suites / 71 tests** 全通过
+- **审查结论**：首轮 Review Agent（独立新上下文）**REQUEST_CHANGES**，唯一 Blocking 为 §4.4.4 第 5 步残留「SOCRATIC 追加引导指令」与实现矛盾；已删除该描述、locale 文案对齐代码，并在 §2.1 / §4.4.2 / §4.4.4 三处统一为「不再追加固定苏格拉底指令」；复审 **APPROVE（0 Blocking）**。Non-blocking 保留：学员 `locale` 指令与 v8「跟随学生语言」硬规则的优先级未明示；无测试锁定新默认提示词内容；工作区混有 Portal 同步等上一阶段改动，提交时需拆分。
+- **Git**：尚未提交
+- **下一步**：用户手动在 KS 后台分别用 Lecture / Socratic 模式验证回答风格与语言规则
+
+---
+
 ## 2026-10-22 ｜ AI Tutor 对话运行日志（文件日志方案）
 
 - **任务（用户）**：要求「使用文件日志这个方案」为 AI Tutor 的对话质量测试提供可观测量。已确认 history 由前端 localStorage 携带、后端截最近 10 条；缺的是服务端运行日志。

@@ -50,8 +50,39 @@ body,
   display: none;
 }
 
+/* 2026-10-22：缩进交给 titleRender 按 H1-H6 控制；AntD 层级不再额外占宽 */
 .course-tree-no-switcher .ant-tree-indent-unit {
-  width: 16px;
+  width: 0;
+}
+
+/* 2026-10-22：长标题省略而不是出现横向滚动条；搜索仍按完整标题/Heading 过滤 */
+.course-tree-no-switcher {
+  min-width: 0;
+  overflow-x: hidden;
+}
+.course-tree-no-switcher .ant-tree,
+.course-tree-no-switcher .ant-tree-list,
+.course-tree-no-switcher .ant-tree-list-holder,
+.course-tree-no-switcher .ant-tree-list-holder-inner,
+.course-tree-no-switcher .ant-tree-treenode {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.course-tree-no-switcher .ant-tree-node-content-wrapper {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.course-tree-no-switcher .ant-tree-title {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+}
+.course-tree-no-switcher .ant-tree-title .course-tree-row {
+  width: 100%;
+  min-width: 0;
 }
 
 /* Page 节点拖拽把手（§3.2.1，2026-10-19）：悬停时行左侧显示，按住把手拖动排序 */

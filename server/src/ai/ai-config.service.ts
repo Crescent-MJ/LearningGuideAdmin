@@ -1,14 +1,16 @@
 import {
   BadRequestException,
+  ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
-  NotImplementedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CourseAiConfig, PromptTemplate } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from './crypto.service';
 import { SaveAiConfigDto } from './dto/save-config.dto';
+import { defaultWelcome } from './prompt-defaults';
 
 /** 单模式的 AI 配置视图（2026-10-20 二次改拍：System Prompt / Welcome / Model 按模式分开） */
 export interface AiModeView {
@@ -45,10 +47,25 @@ export interface AiTutorListView {
   online: boolean;
 }
 
+/** Portal 学员侧可见的 AI Tutor（2026-10-22） */
+export interface LearnerTutorView {
+  /** Portal course.slug */
+  externalId: string;
+  courseId: string;
+  title: string;
+  /** 课程级 Online 开关 */
+  online: boolean;
+  /** 真正可用 = online && 存在上线 Release；Portal 用此字段决定是否展示入口 */
+  available: boolean;
+}
+
 export interface ResolvedPrompts {
   systemPrompt: string;
   welcomeMsg: string;
 }
+
+/** 学员端欢迎语语言（默认模板按语言从 src/ai/prompts/welcome.yaml 取） */
+export type WelcomeLocale = 'zh-CN' | 'en-GB';
 
 /** 课程级关键字段（用于解析「测试所选 Release」与 Online 状态） */
 interface CourseRef {
@@ -250,11 +267,90 @@ export class AiConfigService {
   }
 
   /**
-   * 预留钩子（§4.2.6/§5.2，2026-10-20 拍板）：用户侧读取 Online AI Tutor 列表。
-   * 本期仅预留路由与 Service 方法，不实现业务逻辑。
+   * 用户侧 AI Tutor 列表（§4.2.6/§5.2，2026-10-22 实现）。
+   * 返回所有已映射 Portal 的课程；`available` = online && 有上线 Release。
+   * Portal 依据 `available` 决定是否展示入口。不做缓存，开关切换后立即生效。
    */
-  async listOnlineTutorsForUser(): Promise<never> {
-    throw new NotImplementedException('用户侧 AI Tutor 列表接口尚未实现（预留）');
+  async listOnlineTutorsForUser(): Promise<LearnerTutorView[]> {
+    const courses = await this.prisma.course.findMany({
+      where: { externalId: { not: null } },
+      select: {
+        id: true,
+        title: true,
+        externalId: true,
+        currentReleaseId: true,
+        aiTutorOnline: true,
+      },
+      orderBy: { title: 'asc' },
+    });
+
+    return courses.map((course) => ({
+      externalId: course.externalId as string,
+      courseId: course.id,
+      title: course.title,
+      online: course.aiTutorOnline,
+      available: course.aiTutorOnline && Boolean(course.currentReleaseId),
+    }));
+  }
+
+  /**
+   * Portal 学员端欢迎语（2026-10-22）：按 externalId 匹配课程，只读上线 Release，
+   * 返回 Lecture / Socratic 两种模式生效的 welcome（自定义优先、模板兜底）。
+   */
+  async resolveLearnerWelcome(
+    externalId: string,
+    locale: WelcomeLocale = 'zh-CN',
+  ): Promise<{ lecture: string; socratic: string }> {
+    const course = await this.prisma.course.findFirst({
+      where: { externalId },
+      select: {
+        id: true,
+        currentReleaseId: true,
+        aiTutorOnline: true,
+      },
+    });
+    if (!course) throw new NotFoundException('课程不存在');
+    if (!course.aiTutorOnline) {
+      throw new ForbiddenException('该课程 AI 导师未开放');
+    }
+    if (!course.currentReleaseId) {
+      throw new ConflictException('该课程尚未发布可用版本');
+    }
+    const [lecture, socratic] = await Promise.all([
+      this.resolveModeWelcome(course.id, course.currentReleaseId, 'LECTURE', locale),
+      this.resolveModeWelcome(course.id, course.currentReleaseId, 'SOCRATIC', locale),
+    ]);
+    return { lecture, socratic };
+  }
+
+  /**
+   * 单模式 welcome：课程自定义 > 课程绑定模板 > 默认模板。
+   * 默认模板（isDefault）按 locale 从 src/ai/prompts/welcome.yaml 取，避免中英文互相覆盖。
+   */
+  private async resolveModeWelcome(
+    courseId: string,
+    releaseId: string | null,
+    mode: 'LECTURE' | 'SOCRATIC',
+    locale: WelcomeLocale,
+  ): Promise<string> {
+    const cfg = releaseId
+      ? await this.prisma.courseAiConfig.findUnique({
+          where: { courseId_releaseId: { courseId, releaseId } },
+        })
+      : null;
+    const custom =
+      mode === 'LECTURE' ? cfg?.lectureWelcomeMsg : cfg?.socraticWelcomeMsg;
+    if (custom) return custom;
+
+    const templateId =
+      mode === 'LECTURE' ? cfg?.lectureModeId : cfg?.socraticModeId;
+    const template = templateId
+      ? await this.prisma.promptTemplate.findUnique({ where: { id: templateId } })
+      : await this.prisma.promptTemplate.findFirst({
+          where: { mode, isDefault: true },
+        });
+    if (template && !template.isDefault) return template.welcomeMsg;
+    return defaultWelcome(mode, locale);
   }
 
   /**

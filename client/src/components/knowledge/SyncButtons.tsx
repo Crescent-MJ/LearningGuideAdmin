@@ -5,11 +5,9 @@ import type { SyncSummary } from '../../api/knowledge'
 import { tokens } from '../../theme/tokens'
 
 /**
- * Sync 同步按钮（§3.2.2 外部源接管模型）：
- * - Sync Structure Only：仅同步目录树结构，新增页内容为空
- * - Sync Structure & Course：结构 + 内容全量同步
- * 非破坏性：外部变更不会覆盖本地，失效内容标记 STALE（树中置灰）。
- * 同步目标为侧栏顶部下拉当前选中课程（2026-10-15 改：无锁定机制）。
+ * Sync 同步按钮（§3.2.2）：
+ * 2026-10-22 起外部源为 Portal，只同步「课程标题 + 课时标题」，
+ * 不读写正文；同步目标为侧栏顶部下拉当前选中课程。
  */
 export function SyncButtons() {
   const { message } = App.useApp()
@@ -17,17 +15,14 @@ export function SyncButtons() {
   const syncing = useKnowledgeStore((s) => s.syncing)
   const runSync = useKnowledgeStore((s) => s.runSync)
 
-  const doSync = async (kind: 'structure' | 'all') => {
+  const doSync = async () => {
     try {
-      const summary: SyncSummary = await runSync(kind)
+      const summary: SyncSummary = await runSync('structure')
       if (summary.unchanged) {
-        message.info('已与外部源一致，无变更')
+        message.info('课程与课时标题已与 Portal 一致，无变更')
       } else {
         message.success(
-          `同步完成：新增 ${summary.created} 个节点` +
-            (summary.staleMarked > 0
-              ? `，标记 ${summary.staleMarked} 个失效节点（置灰，不作为 AI Tutor 知识库）`
-              : ''),
+          `同步完成：新增 ${summary.created} 个课时，更新 ${summary.updated} 个标题`,
         )
       }
     } catch (e) {
@@ -41,21 +36,13 @@ export function SyncButtons() {
     <Space direction="vertical" style={{ width: '100%' }} size={tokens.spacing.xs}>
       <Button
         block
-        type="link"
-        icon={<SyncOutlined spin={syncing} />}
-        disabled={disabled || syncing}
-        onClick={() => void doSync('structure')}
-      >
-        Sync Structure Only
-      </Button>
-      <Button
-        block
         type="primary"
+        icon={<SyncOutlined spin={syncing} />}
         loading={syncing}
         disabled={disabled}
-        onClick={() => void doSync('all')}
+        onClick={() => void doSync()}
       >
-        Sync Structure &amp; Course
+        从 Portal 同步标题
       </Button>
       {disabled && (
         <span style={{ fontSize: tokens.fontSize.md, color: tokens.color.text.tertiary }}>

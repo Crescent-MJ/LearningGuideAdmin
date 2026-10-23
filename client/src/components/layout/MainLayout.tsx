@@ -61,8 +61,9 @@ export function MainLayout({
               left: navCollapsed ? 0 : NAV_WIDTH,
               top: '50%',
               transform: 'translateY(-50%)',
-              width: 22,
-              height: 48,
+              // 2026-10-22：更窄更高；右侧不越过侧栏内白色目录面板的左边缘（Sider padding 16）
+              width: 14,
+              height: 72,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -82,7 +83,7 @@ export function MainLayout({
           >
             <span
               style={{
-                fontSize: tokens.fontSize['2xl'],
+                fontSize: tokens.fontSize.md,
                 fontWeight: tokens.fontWeight.bold,
                 lineHeight: 1,
               }}

@@ -1,9 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import {
-  BadRequestException,
-  NotFoundException,
-  NotImplementedException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { AiConfigService } from './ai-config.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CryptoService } from './crypto.service';
@@ -14,7 +10,7 @@ import { CryptoService } from './crypto.service';
  */
 describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
   const mockPrisma = {
-    course: { findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
+    course: { findUnique: jest.fn(), findFirst: jest.fn(), findMany: jest.fn(), update: jest.fn() },
     courseAiConfig: { findUnique: jest.fn(), upsert: jest.fn() },
     release: { findUnique: jest.fn() },
     promptTemplate: { findUnique: jest.fn(), findFirst: jest.fn() },
@@ -59,7 +55,9 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
 
   it('setOnline：课程不存在应 404', async () => {
     mockPrisma.course.findUnique.mockResolvedValue(null);
-    await expect(service.setOnline('x', true)).rejects.toThrow(NotFoundException);
+    await expect(service.setOnline('x', true)).rejects.toThrow(
+      NotFoundException,
+    );
     expect(mockPrisma.course.update).not.toHaveBeenCalled();
   });
 
@@ -83,7 +81,9 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
       aiTutorOnline: false,
     });
     mockPrisma.courseAiConfig.findUnique.mockResolvedValue(null);
-    mockPrisma.release.findUnique.mockResolvedValue({ versionTag: 'Course_20260101' });
+    mockPrisma.release.findUnique.mockResolvedValue({
+      versionTag: 'Course_20260101',
+    });
     const view = await service.getConfig('c1');
     expect(view.releaseId).toBe('r1');
     expect(view.releaseTag).toBe('Course_20260101');
@@ -98,7 +98,9 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
       aiTutorOnline: false,
     });
     mockPrisma.courseAiConfig.findUnique.mockResolvedValue(null);
-    mockPrisma.release.findUnique.mockResolvedValue({ versionTag: 'Course_20260101' });
+    mockPrisma.release.findUnique.mockResolvedValue({
+      versionTag: 'Course_20260101',
+    });
     const view = await service.getConfig('c1');
     expect(view.releaseId).toBe('r1');
     expect(view.isLive).toBe(false);
@@ -125,7 +127,10 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
       aiTestReleaseId: null,
       aiTutorOnline: false,
     });
-    mockPrisma.release.findUnique.mockResolvedValue({ id: 'r1', courseId: 'c1' });
+    mockPrisma.release.findUnique.mockResolvedValue({
+      id: 'r1',
+      courseId: 'c1',
+    });
     mockPrisma.course.update.mockResolvedValue({
       id: 'c1',
       currentReleaseId: 'r2',
@@ -151,7 +156,10 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
       aiTestReleaseId: null,
       aiTutorOnline: false,
     });
-    mockPrisma.release.findUnique.mockResolvedValue({ id: 'r9', courseId: 'other' });
+    mockPrisma.release.findUnique.mockResolvedValue({
+      id: 'r9',
+      courseId: 'other',
+    });
     await expect(service.setActiveRelease('c1', 'r9')).rejects.toThrow(
       NotFoundException,
     );
@@ -303,6 +311,71 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
     expect(socratic).toEqual({ systemPrompt: 'tpl-S', welcomeMsg: 'tpl-SW' });
   });
 
+  it('resolveLearnerWelcome：按 externalId 返回两种模式生效的 welcome（自定义优先、模板兜底）', async () => {
+    mockPrisma.course.findFirst.mockResolvedValue({ id: 'c1', currentReleaseId: 'r1', aiTutorOnline: true });
+    mockPrisma.courseAiConfig.findUnique.mockResolvedValue({
+      lectureWelcomeMsg: 'wel-L',
+      socraticWelcomeMsg: null,
+    });
+    mockPrisma.promptTemplate.findFirst.mockImplementation(({ where }: { where: { mode: string } }) =>
+      Promise.resolve(where.mode === 'LECTURE' ? { welcomeMsg: 'tpl-L' } : { welcomeMsg: 'tpl-SW' }),
+    );
+    const view = await service.resolveLearnerWelcome('portal-slug');
+    expect(view).toEqual({ lecture: 'wel-L', socratic: 'tpl-SW' });
+    expect(mockPrisma.course.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { externalId: 'portal-slug' } }));
+  });
+
+  it('resolveLearnerWelcome：默认模板（isDefault）按 locale 取文件欢迎语，且不含“选择课程”口径', async () => {
+    mockPrisma.course.findFirst.mockResolvedValue({ id: 'c1', currentReleaseId: 'r1', aiTutorOnline: true });
+    mockPrisma.courseAiConfig.findUnique.mockResolvedValue(null);
+    mockPrisma.promptTemplate.findFirst.mockResolvedValue({ id: 'lecture-default', isDefault: true, welcomeMsg: 'DB-zh' });
+    const zh = await service.resolveLearnerWelcome('portal-slug', 'zh-CN');
+    const en = await service.resolveLearnerWelcome('portal-slug', 'en-GB');
+    expect(zh.lecture).not.toBe('DB-zh');
+    expect(zh.lecture).not.toContain('选择课程');
+    expect(en.lecture).toMatch(/AI Tutor/);
+    expect(zh.lecture).not.toBe(en.lecture);
+    expect(zh.socratic).toMatch(/AI 导师/);
+  });
+
+  it('resolveLearnerWelcome：课程绑定非默认模板时使用模板自身的 welcomeMsg', async () => {
+    mockPrisma.course.findFirst.mockResolvedValue({ id: 'c1', currentReleaseId: 'r1', aiTutorOnline: true });
+    mockPrisma.courseAiConfig.findUnique.mockResolvedValue({
+      lectureModeId: 'custom-lecture',
+      lectureWelcomeMsg: null,
+      socraticWelcomeMsg: null,
+    });
+    mockPrisma.promptTemplate.findUnique.mockResolvedValue({
+      id: 'custom-lecture',
+      isDefault: false,
+      welcomeMsg: 'Custom template welcome',
+    });
+    mockPrisma.promptTemplate.findFirst.mockResolvedValue({ id: 'socratic-default', isDefault: true, welcomeMsg: 'DB-zh' });
+    const view = await service.resolveLearnerWelcome('portal-slug', 'en-GB');
+    expect(view.lecture).toBe('Custom template welcome');
+    expect(view.socratic).toMatch(/AI Tutor/);
+  });
+
+  it('resolveLearnerWelcome：课程自定义 welcome 优先于模板与文件默认值', async () => {
+    mockPrisma.course.findFirst.mockResolvedValue({ id: 'c1', currentReleaseId: 'r1', aiTutorOnline: true });
+    mockPrisma.courseAiConfig.findUnique.mockResolvedValue({
+      lectureWelcomeMsg: 'Course override L',
+      socraticWelcomeMsg: 'Course override S',
+    });
+    mockPrisma.promptTemplate.findFirst.mockResolvedValue({ id: 'lecture-default', isDefault: true, welcomeMsg: 'DB-zh' });
+    const view = await service.resolveLearnerWelcome('portal-slug', 'en-GB');
+    expect(view).toEqual({ lecture: 'Course override L', socratic: 'Course override S' });
+  });
+
+  it('resolveLearnerWelcome：课程不存在 / 未开放 / 无上线版本分别 404 / 403 / 409', async () => {
+    mockPrisma.course.findFirst.mockResolvedValueOnce(null);
+    await expect(service.resolveLearnerWelcome('missing')).rejects.toBeInstanceOf(NotFoundException);
+    mockPrisma.course.findFirst.mockResolvedValueOnce({ id: 'c1', currentReleaseId: 'r1', aiTutorOnline: false });
+    await expect(service.resolveLearnerWelcome('offline')).rejects.toBeInstanceOf(ForbiddenException);
+    mockPrisma.course.findFirst.mockResolvedValueOnce({ id: 'c1', currentReleaseId: null, aiTutorOnline: true });
+    await expect(service.resolveLearnerWelcome('unpublished')).rejects.toBeInstanceOf(ConflictException);
+  });
+
   it('resolveRuntime：按模式取模型（缺省回退默认）', async () => {
     mockPrisma.courseAiConfig.findUnique.mockResolvedValue({
       llmProvider: 'openrouter',
@@ -316,9 +389,56 @@ describe('AiConfigService — Online & Release（§4.2.6/§5.2）', () => {
     expect(socratic.model).toBe('deepseek/deepseek-v4.1-flash');
   });
 
-  it('listOnlineTutorsForUser：预留钩子应抛 NotImplementedException（501）', async () => {
-    await expect(service.listOnlineTutorsForUser()).rejects.toThrow(
-      NotImplementedException,
+  it('listOnlineTutorsForUser：返回 externalId 映射，available = online && 有上线版本', async () => {
+    mockPrisma.course.findMany.mockResolvedValue([
+      {
+        id: 'c1',
+        externalId: 'epicureanism',
+        title: 'A',
+        aiTutorOnline: true,
+        currentReleaseId: 'r1',
+      },
+      {
+        id: 'c2',
+        externalId: 'stoicism',
+        title: 'B',
+        aiTutorOnline: true,
+        currentReleaseId: null,
+      },
+      {
+        id: 'c3',
+        externalId: 'calculus',
+        title: 'C',
+        aiTutorOnline: false,
+        currentReleaseId: 'r2',
+      },
+    ]);
+    const list = await service.listOnlineTutorsForUser();
+    expect(list).toEqual([
+      {
+        externalId: 'epicureanism',
+        courseId: 'c1',
+        title: 'A',
+        online: true,
+        available: true,
+      },
+      {
+        externalId: 'stoicism',
+        courseId: 'c2',
+        title: 'B',
+        online: true,
+        available: false,
+      },
+      {
+        externalId: 'calculus',
+        courseId: 'c3',
+        title: 'C',
+        online: false,
+        available: false,
+      },
+    ]);
+    expect(mockPrisma.course.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { externalId: { not: null } } }),
     );
   });
 });

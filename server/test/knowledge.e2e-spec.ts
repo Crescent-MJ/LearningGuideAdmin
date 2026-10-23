@@ -5,6 +5,33 @@ import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { configureApp } from '../src/common/app-setup';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { PortalSourceService } from '../src/sync/portal-source.service';
+
+/** 假 Portal 数据源：只提供课程/课时标题结构（Phase 1 不传内容），避免 e2e 依赖真实 Portal */
+const PORTAL_COURSES = [
+  {
+    externalId: 'ext-quantum-001',
+    title: 'Quantum Basics',
+    description: 'Introduction to quantum mechanics',
+    sections: [
+      {
+        externalId: 'sec-foundations',
+        title: 'Foundations',
+        lessons: [
+          { externalId: 'lesson-foundations', title: 'Foundations', pages: [] },
+        ],
+      },
+    ],
+    lessons: [
+      { externalId: 'lesson-foundations', title: 'Foundations', pages: [] },
+    ],
+  },
+];
+const fakePortalSource = {
+  listCourses: async () => PORTAL_COURSES,
+  getCourse: async (externalId: string) =>
+    PORTAL_COURSES.find((c) => c.externalId === externalId),
+};
 
 /**
  * Knowledge System 后端全流程 e2e（开发文档 §5.1、§5.3）。
@@ -17,7 +44,10 @@ describe('Knowledge API (e2e)', () => {
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    })
+      .overrideProvider(PortalSourceService)
+      .useValue(fakePortalSource)
+      .compile();
     app = moduleFixture.createNestApplication();
     configureApp(app);
     await app.init();
@@ -123,7 +153,11 @@ describe('Knowledge API (e2e)', () => {
   it('PUT /api/pages/:id 更新内容与 sectionTags', async () => {
     const res = await request(app.getHttpServer())
       .put(`/api/pages/${pageId}`)
-      .send({ contentMd: '# 更新', sectionTags: { 'h1-geng-xin': ['Teaching Guidance'] }, sortOrder: 1 })
+      .send({
+        contentMd: '# 更新',
+        sectionTags: { 'h1-geng-xin': ['Teaching Guidance'] },
+        sortOrder: 1,
+      })
       .expect(200);
     expect(res.body.data.contentMd).toBe('# 更新');
   });
@@ -243,7 +277,9 @@ describe('Knowledge API (e2e)', () => {
     const res = await request(app.getHttpServer())
       .get(`/api/courses/${courseId}/releases`)
       .expect(200);
-    expect(res.body.data.find((r: { id: string }) => r.id === releaseId).isActive).toBe(true);
+    expect(
+      res.body.data.find((r: { id: string }) => r.id === releaseId).isActive,
+    ).toBe(true);
   });
 
   it('DELETE /api/releases/:releaseId Live 版本应 409 CONFLICT（§3.4.5 双保护）', async () => {
@@ -298,11 +334,19 @@ describe('Knowledge API (e2e)', () => {
     const list = await request(app.getHttpServer())
       .get(`/api/courses/${courseId}/releases`)
       .expect(200);
-    expect(list.body.data.find((r: { id: string }) => r.id === v2Id).isActive).toBe(true);
-    expect(list.body.data.find((r: { id: string }) => r.id === releaseId).isActive).toBe(false);
+    expect(
+      list.body.data.find((r: { id: string }) => r.id === v2Id).isActive,
+    ).toBe(true);
+    expect(
+      list.body.data.find((r: { id: string }) => r.id === releaseId).isActive,
+    ).toBe(false);
     // 「切换到此版本」后 editing 落在被切换的版本（2026-10-20 三次改拍）
-    expect(list.body.data.find((r: { id: string }) => r.id === releaseId).isEditing).toBe(true);
-    expect(list.body.data.find((r: { id: string }) => r.id === v2Id).isEditing).toBe(false);
+    expect(
+      list.body.data.find((r: { id: string }) => r.id === releaseId).isEditing,
+    ).toBe(true);
+    expect(
+      list.body.data.find((r: { id: string }) => r.id === v2Id).isEditing,
+    ).toBe(false);
   });
 
   it('POST /api/courses/:id/activate-release releaseId 不属于该课程应 404', async () => {
@@ -336,7 +380,8 @@ describe('Knowledge API (e2e)', () => {
       .expect(200);
     // 取一个既非 Live、也非测试所选的版本删除
     const normal = list.body.data.find(
-      (r: { isActive: boolean; isTestSelected: boolean }) => !r.isActive && !r.isTestSelected,
+      (r: { isActive: boolean; isTestSelected: boolean }) =>
+        !r.isActive && !r.isTestSelected,
     );
     expect(normal).toBeTruthy();
     await request(app.getHttpServer())
@@ -345,7 +390,9 @@ describe('Knowledge API (e2e)', () => {
     const after = await request(app.getHttpServer())
       .get(`/api/courses/${courseId}/releases`)
       .expect(200);
-    expect(after.body.data.find((r: { id: string }) => r.id === normal.id)).toBeUndefined();
+    expect(
+      after.body.data.find((r: { id: string }) => r.id === normal.id),
+    ).toBeUndefined();
   });
 
   it('DELETE /api/releases/:releaseId 删除当前编辑版本时清空 editing 指针（§3.4.5 三次改拍）', async () => {
@@ -374,7 +421,9 @@ describe('Knowledge API (e2e)', () => {
       list.body.data.find((r: { id: string }) => r.id === editingId),
     ).toBeUndefined();
     // editing 指针已清空：无任何版本带 isEditing=true
-    expect(list.body.data.some((r: { isEditing: boolean }) => r.isEditing)).toBe(false);
+    expect(
+      list.body.data.some((r: { isEditing: boolean }) => r.isEditing),
+    ).toBe(false);
   });
 
   it('DELETE /api/courses/:id 存在 Release 应 409 CONFLICT（删除保护）', async () => {
@@ -394,15 +443,21 @@ describe('Knowledge API (e2e)', () => {
     expect(res.body.error.code).toBe('NOT_FOUND');
   });
 
-  it('POST /api/sync/all 导入外部课程并幂等（§3.2.2/§5.1.4）', async () => {
+  it('POST /api/sync/structure 仅同步课程/课时标题并幂等（§3.2.2/§5.1.4）', async () => {
     const externalId = 'ext-quantum-001';
+    // 幂等前置：清理历史遗留的同一外部课程（Release 无级联，需先删）
+    const leftover = await prisma.course.findFirst({ where: { externalId } });
+    if (leftover) {
+      await prisma.release.deleteMany({ where: { courseId: leftover.id } });
+      await prisma.course.delete({ where: { id: leftover.id } });
+    }
+
     const res = await request(app.getHttpServer())
-      .post('/api/sync/all')
+      .post('/api/sync/structure')
       .send({ externalId })
       .expect(201);
     expect(res.body.success).toBe(true);
-    // 外部量子课程 1 Lesson（含 2 Page）→ 合并为 1 个本地 Page
-    expect(res.body.data.created).toBeGreaterThanOrEqual(1);
+    expect(res.body.data.created).toBe(1);
     expect(res.body.data.unchanged).toBe(false);
 
     const course = await prisma.course.findFirst({
@@ -411,15 +466,25 @@ describe('Knowledge API (e2e)', () => {
     });
     expect(course).not.toBeNull();
     const firstPage = course!.pages[0];
-    expect(firstPage.contentMd.length).toBeGreaterThan(0);
+    expect(firstPage.externalId).toBe('lesson-foundations');
+    expect(firstPage.title).toBe('Foundations');
+    expect(firstPage.contentMd).toBe(''); // Phase 1 内容不同步
     expect(firstPage.syncState).toBe('SYNCED');
 
     // 再次同步：无变更（幂等）
     const again = await request(app.getHttpServer())
-      .post('/api/sync/all')
+      .post('/api/sync/structure')
       .send({ externalId })
       .expect(201);
     expect(again.body.data.unchanged).toBe(true);
+  });
+
+  it('POST /api/sync/all 内容同步已禁用应 400 CONTENT_SYNC_DISABLED（2026-10-22 拍板）', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/api/sync/all')
+      .send({ externalId: 'ext-quantum-001' })
+      .expect(400);
+    expect(res.body.error.code).toBe('CONTENT_SYNC_DISABLED');
   });
 
   it('POST /api/sync/structure 缺少 externalId 应 400 VALIDATION_ERROR', async () => {
@@ -454,7 +519,9 @@ describe('Knowledge API (e2e)', () => {
   });
 
   it('GET /api/courses 成功信封完整（§5.3）', async () => {
-    const res = await request(app.getHttpServer()).get('/api/courses').expect(200);
+    const res = await request(app.getHttpServer())
+      .get('/api/courses')
+      .expect(200);
     expect(Object.keys(res.body).sort()).toEqual(
       ['data', 'error', 'message', 'success'].sort(),
     );

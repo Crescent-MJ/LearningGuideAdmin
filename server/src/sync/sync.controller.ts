@@ -1,10 +1,10 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Post } from '@nestjs/common';
 import { SyncService } from './sync.service';
 import { SyncRequestDto } from './dto/sync-request.dto';
 
 /**
  * 同步接口（§5.1.5 / §3.2.2 外部源接管模型）。
- * 外部源为 Mock fixture（demo-fixtures.ts），真实 API 接入后仅替换数据源。
+ * 2026-10-22 起外部源为 LearningGuidePortal，仅同步课程与课时标题。
  */
 @Controller('sync')
 export class SyncController {
@@ -22,9 +22,12 @@ export class SyncController {
     return this.syncService.sync(dto.externalId, 'structure');
   }
 
-  /** 同步结构 + 内容（非破坏性） */
+  /** 内容同步已禁用（2026-10-22 拍板：本期只同步标题） */
   @Post('all')
-  syncAll(@Body() dto: SyncRequestDto) {
-    return this.syncService.sync(dto.externalId, 'all');
+  syncAll(_dto: SyncRequestDto) {
+    throw new BadRequestException({
+      code: 'CONTENT_SYNC_DISABLED',
+      message: '本期仅同步课程与课时标题，正文内容同步已禁用',
+    });
   }
 }

@@ -2,16 +2,18 @@ import {
   Body,
   Controller,
   Get,
-  HttpException,
   Param,
   Post,
   Put,
+  Query,
   Res,
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { AiChatService } from './ai-chat.service';
 import { AiConfigService } from './ai-config.service';
 import { ChatStreamDto } from './dto/chat-stream.dto';
+import { LearnerChatStreamDto } from './dto/learner-chat-stream.dto';
+import { pipeSse } from './sse-stream';
 import { SaveAiConfigDto } from './dto/save-config.dto';
 import { ResetAiConfigDto } from './dto/reset-config.dto';
 import { SetOnlineDto } from './dto/set-online.dto';
@@ -93,48 +95,45 @@ export class AiController {
    */
   @Post('chat-stream')
   async chatStream(@Body() dto: ChatStreamDto, @Res() res: Response) {
-    const gen = this.chat.streamChat(dto);
-    const first = await gen.next(); // 首字节前错误 → 交给过滤器
-
-    res.status(200).set({
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    res.flushHeaders();
-
-    const write = (obj: unknown) =>
-      res.write(`data: ${JSON.stringify(obj)}\n\n`);
-
-    if (!first.done) write({ delta: first.value });
-    try {
-      for await (const delta of gen) write({ delta });
-      write({ done: true });
-    } catch (err) {
-      write({
-        error:
-          err instanceof HttpException
-            ? err.message
-            : 'AI 服务暂时不可用，请稍后重试',
-      });
-    } finally {
-      res.end();
-    }
+    await pipeSse(this.chat.streamChat(dto), res);
   }
 }
 
 /**
- * 预留：用户侧 AI Tutor 接口（§4.2.6/§5.2，2026-10-20 拍板）。
- * 仅预留路由与 Service 方法，**不实现业务逻辑**，供后续学生端接入。
+ * 用户侧 AI Tutor 接口（§4.2.6/§5.2，2026-10-20 预留、2026-10-22 实现）。
+ * 供 LearningGuidePortal 学员端调用：先查 Online 列表，再走学员专用流式对话。
  */
 @Controller('user')
 export class UserAiController {
-  constructor(private readonly configs: AiConfigService) {}
+  constructor(
+    private readonly configs: AiConfigService,
+    private readonly chat: AiChatService,
+  ) {}
 
-  /** 用户侧读取 Online AI Tutor 列表（预留钩子，当前返回 501 未实现） */
+  /** 用户侧读取 Online AI Tutor 列表（仅 online + 有上线 Release 的课程） */
   @Get('ai-tutors')
   listOnlineTutors() {
     return this.configs.listOnlineTutorsForUser();
+  }
+
+  /** 学员端读取某课程两种模式的欢迎语（2026-10-22，只读上线 Release；locale 决定默认模板语言） */
+  @Get('ai-tutors/:externalId/welcome')
+  getTutorWelcome(
+    @Param('externalId') externalId: string,
+    @Query('locale') locale?: string,
+  ) {
+    return this.configs.resolveLearnerWelcome(
+      externalId,
+      locale === 'en-GB' ? 'en-GB' : 'zh-CN',
+    );
+  }
+
+  /** 学员端流式对话（只读 currentReleaseId，强制 Online） */
+  @Post('ai/chat-stream')
+  async learnerChatStream(
+    @Body() dto: LearnerChatStreamDto,
+    @Res() res: Response,
+  ) {
+    await pipeSse(this.chat.streamLearnerChat(dto), res);
   }
 }

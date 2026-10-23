@@ -14,6 +14,7 @@ import { tokens } from '../../theme/tokens'
  */
 export function Sidebar() {
   const externalCourses = useKnowledgeStore((s) => s.externalCourses)
+  const externalCoursesError = useKnowledgeStore((s) => s.externalCoursesError)
   const selectedExternalId = useKnowledgeStore((s) => s.selectedExternalId)
   const loadExternalCourses = useKnowledgeStore((s) => s.loadExternalCourses)
   const selectExternal = useKnowledgeStore((s) => s.selectExternal)
@@ -43,9 +44,15 @@ export function Sidebar() {
             label: e.title,
           }))}
         />
+        {externalCoursesError && (
+          <Typography.Text type="danger" style={{ display: 'block', marginTop: tokens.spacing.xs, fontSize: tokens.fontSize.md }}>
+            {externalCoursesError}
+          </Typography.Text>
+        )}
       </div>
       <SearchBox value={keyword} onChange={setKeyword} />
-      <div style={{ flex: 1, overflow: 'auto', marginTop: tokens.spacing.sm }}>
+      {/* 2026-10-22：只允许纵向滚动；长 lesson/heading 名称用省略号，不出现横向滚动条 */}
+      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', marginTop: tokens.spacing.sm }}>
         <CourseTree keyword={keyword} />
       </div>
       <div style={{ marginTop: tokens.spacing.sm }}>

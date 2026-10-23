@@ -1,4 +1,8 @@
-import { NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AiChatLogger, type AiChatLogEntry } from './ai-chat-logger';
 import { AiChatService } from './ai-chat.service';
@@ -23,6 +27,7 @@ function setup(stream: StreamFn) {
         currentReleaseId: LIVE_RELEASE,
         aiTestReleaseId: TEST_RELEASE,
       }),
+      findFirst: jest.fn().mockResolvedValue(null),
     },
     release: {
       findUnique: jest.fn().mockResolvedValue({
@@ -65,7 +70,7 @@ function setup(stream: StreamFn) {
   const write = chatLogger.write as jest.MockedFunction<AiChatLogger['write']>;
   const entryOf = (): AiChatLogEntry =>
     write.mock.calls[0][0] as unknown as AiChatLogEntry;
-  return { service, write, entryOf };
+  return { service, write, entryOf, prisma, configs, rateLimit };
 }
 
 function dto(history: ChatStreamDto['history'] = []): ChatStreamDto {
@@ -162,5 +167,109 @@ describe('AiChatService 对话日志（§4.4.2 第 7 步）', () => {
     expect(entry.status).toBe('error');
     expect(entry.releaseId).toBeNull();
     expect(write).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('AiChatService 学员端对话（2026-10-22）', () => {
+  const learnerDto = (over: Record<string, unknown> = {}) => ({
+    externalCourseId: 'epicureanism',
+    message: 'What is pleasure?',
+    mode: 'LECTURE' as const,
+    locale: 'en-GB' as const,
+    history: [],
+    ...over,
+  });
+
+  it('Online 关闭时拒绝，并记录 learner 错误日志', async () => {
+    const { service, write, entryOf, prisma } = setup(async function* () {
+      yield '';
+    });
+    (prisma.course.findFirst as jest.Mock).mockResolvedValue({
+      id: COURSE_ID,
+      currentReleaseId: LIVE_RELEASE,
+      aiTutorOnline: false,
+    });
+
+    await expect(
+      collect(service.streamLearnerChat(learnerDto())),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(write).toHaveBeenCalledTimes(1);
+    const entry = entryOf();
+    expect(entry.channel).toBe('learner');
+    expect(entry.status).toBe('error');
+  });
+
+  it('无上线 Release 时拒绝', async () => {
+    const { service, prisma } = setup(async function* () {
+      yield '';
+    });
+    (prisma.course.findFirst as jest.Mock).mockResolvedValue({
+      id: COURSE_ID,
+      currentReleaseId: null,
+      aiTutorOnline: true,
+    });
+
+    await expect(
+      collect(service.streamLearnerChat(learnerDto())),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('只读 currentReleaseId（忽略 aiTestReleaseId）并注入英文语言指令', async () => {
+    let systemPrompt = '';
+    const { service, prisma, configs } = setup(
+      async function* (opts: LlmStreamOptions) {
+        systemPrompt = opts.messages[0]?.content ?? '';
+        yield 'ok';
+      },
+    );
+    (prisma.course.findFirst as jest.Mock).mockResolvedValue({
+      id: COURSE_ID,
+      currentReleaseId: LIVE_RELEASE,
+      aiTestReleaseId: TEST_RELEASE,
+      aiTutorOnline: true,
+    });
+
+    await expect(
+      collect(service.streamLearnerChat(learnerDto())),
+    ).resolves.toBe('ok');
+    expect(prisma.course.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { externalId: 'epicureanism' } }),
+    );
+    expect(configs.resolveRuntime).toHaveBeenCalledWith(
+      COURSE_ID,
+      LIVE_RELEASE,
+      'LECTURE',
+    );
+    expect(configs.resolvePrompts).toHaveBeenCalledWith(
+      COURSE_ID,
+      LIVE_RELEASE,
+      'LECTURE',
+    );
+    expect(systemPrompt).toContain("Answer in the language of the student's latest message.");
+  });
+
+  it('直播间流量走独立限流槽位（study-group），默认按 portal', async () => {
+    const { service, prisma, rateLimit } = setup(async function* () {
+      yield 'ok';
+    });
+    (prisma.course.findFirst as jest.Mock).mockResolvedValue({
+      id: COURSE_ID,
+      currentReleaseId: LIVE_RELEASE,
+      aiTutorOnline: true,
+    });
+
+    await collect(service.streamLearnerChat(learnerDto()));
+    expect(rateLimit.assertAllowed).toHaveBeenLastCalledWith(
+      COURSE_ID,
+      'portal',
+    );
+
+    await collect(
+      service.streamLearnerChat(learnerDto({ channel: 'study-group' })),
+    );
+    expect(rateLimit.assertAllowed).toHaveBeenLastCalledWith(
+      COURSE_ID,
+      'study-group',
+    );
   });
 });

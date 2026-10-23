@@ -33,6 +33,7 @@ interface KnowledgeState {
 
   // 外部源同步（§3.2.2）
   externalCourses: ExternalCourseStatus[]
+  externalCoursesError: string | null
   selectedExternalId: string | null
   syncing: boolean
 
@@ -92,6 +93,7 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
   loading: false,
 
   externalCourses: [],
+  externalCoursesError: null,
   selectedExternalId: null,
   syncing: false,
 
@@ -126,10 +128,18 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
   },
 
   async selectPage(courseId, pageId) {
-    const detail = get().details[courseId]
-    const page = detail?.pages.find((p) => p.id === pageId)
-    if (!page) return
+    // 2026-10-22 修复：重复点击当前 Page 不重置 draft，避免编辑器反复 replaceBlocks
+    // 导致目录/正文出现重复 Heading。
+    if (
+      get().selectedCourseId === courseId &&
+      get().selectedPageId === pageId &&
+      get().draft
+    )
+      return
     await get().flushSave()
+    // flushSave 后详情可能已刷新，重新取 page，避免写回旧 contentMd
+    const page = get().details[courseId]?.pages.find((p) => p.id === pageId)
+    if (!page) return
     set({
       selectedCourseId: courseId,
       selectedPageId: pageId,
@@ -185,8 +195,12 @@ export const useKnowledgeStore = create<KnowledgeState>((set, get) => ({
   },
 
   async loadExternalCourses() {
-    const externalCourses = await knowledgeApi.listExternalCourses()
-    set({ externalCourses })
+    try {
+      const externalCourses = await knowledgeApi.listExternalCourses()
+      set({ externalCourses, externalCoursesError: null })
+    } catch (e) {
+      set({ externalCourses: [], externalCoursesError: (e as Error).message })
+    }
   },
 
   async selectExternal(externalId) {

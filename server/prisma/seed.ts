@@ -4,56 +4,30 @@
  * 说明：
  * - 使用 upsert 保证幂等：重复执行不会报错、不会重复插入
  * - 运行方式：npx prisma db seed（package.json 已配置 prisma.seed）
- * - 本阶段（Phase 1）由主智能体在 PostgreSQL 就绪后执行
+ * - 默认 Prompt / Welcome 不再硬编码在本文件：见 `src/ai/prompts/`
+ *   （lecture.md、socratic.md、welcome.yaml），改动后运行 `npm run prompts:sync`。
  */
 import { PrismaClient } from '@prisma/client';
+import { promptTemplateSeeds } from '../src/ai/prompt-defaults';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  // 1. 讲师型（LECTURE）默认提示词模板
-  await prisma.promptTemplate.upsert({
-    where: { id: 'lecture-default' },
-    update: {
-      mode: 'LECTURE',
-      systemPrompt:
-        '你是一名讲师型助手，擅长用结构化方式解释内容。请基于提供的课程资料，给出清晰、有条理的讲解。',
-      welcomeMsg:
-        '你好！我是你的学习助手。请选择一个课程，我将根据课程内容为你讲解。',
-      isDefault: true,
-    },
-    create: {
-      id: 'lecture-default',
-      mode: 'LECTURE',
-      systemPrompt:
-        '你是一名讲师型助手，擅长用结构化方式解释内容。请基于提供的课程资料，给出清晰、有条理的讲解。',
-      welcomeMsg:
-        '你好！我是你的学习助手。请选择一个课程，我将根据课程内容为你讲解。',
-      isDefault: true,
-    },
-  });
+  // 1. 默认提示词模板（LECTURE / SOCRATIC，来自 src/ai/prompts/ 文件）
+  for (const seed of promptTemplateSeeds()) {
+    await prisma.promptTemplate.upsert({
+      where: { id: seed.id },
+      update: {
+        mode: seed.mode,
+        systemPrompt: seed.systemPrompt,
+        welcomeMsg: seed.welcomeMsg,
+        isDefault: seed.isDefault,
+      },
+      create: seed,
+    });
+  }
 
-  // 2. 苏格拉底式（SOCRATIC）默认提示词模板
-  await prisma.promptTemplate.upsert({
-    where: { id: 'socratic-default' },
-    update: {
-      mode: 'SOCRATIC',
-      systemPrompt:
-        '你是一名苏格拉底式引导助手。不要直接给出完整答案，而要通过提问帮助用户自己得出结论。将答案拆解成一系列反问和引导性问题，逐步启发用户。',
-      welcomeMsg: '你好！让我通过提问来帮助你深入学习。请选择一个课程开始。',
-      isDefault: true,
-    },
-    create: {
-      id: 'socratic-default',
-      mode: 'SOCRATIC',
-      systemPrompt:
-        '你是一名苏格拉底式引导助手。不要直接给出完整答案，而要通过提问帮助用户自己得出结论。将答案拆解成一系列反问和引导性问题，逐步启发用户。',
-      welcomeMsg: '你好！让我通过提问来帮助你深入学习。请选择一个课程开始。',
-      isDefault: true,
-    },
-  });
-
-  // 3. 预设 Tag 词库（§3.3.3 方案 B：4 个语义标签带预设色，其余由用户输入自动沉淀）
+  // 2. 预设 Tag 词库（§3.3.3 方案 B：4 个语义标签带预设色，其余由用户输入自动沉淀）
   const presetTags = [
     { name: 'Core Knowledge', color: 'blue' },
     { name: 'Teaching Guidance', color: 'green' },

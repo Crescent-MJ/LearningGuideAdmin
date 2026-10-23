@@ -151,7 +151,7 @@ describe('AI API (e2e)', () => {
     expect(stored!.apiKey!.split(':')).toHaveLength(3); // iv:tag:cipher
   });
 
-  it('POST /api/ai/chat-stream SSE 流：自定义 Prompt + Socratic 注入 + 排除 STALE 内容（§4.4.2）', async () => {
+  it('POST /api/ai/chat-stream SSE 流：自定义 Prompt 优先、不再注入固定苏格拉底指令、排除 STALE 内容（§4.4.2）', async () => {
     lastOpts = null;
     const res = await request(app.getHttpServer())
       .post('/api/ai/chat-stream')
@@ -164,7 +164,8 @@ describe('AI API (e2e)', () => {
 
     const system = lastOpts!.messages.find((m) => m.role === 'system')!.content;
     expect(system).toContain('CUSTOM-PROMPT'); // 自定义优先于模板
-    expect(system).toContain('苏格拉底式的引导者');
+    // 2026-10-22：默认模板自带完整教学指令，运行时不再追加固定苏格拉底指令
+    expect(system).not.toContain('苏格拉底式的引导者');
     expect(system).toContain('SYNCED-CONTENT');
     expect(system).not.toContain('STALE-CONTENT-SHOULD-BE-EXCLUDED'); // §3.4.3 快照仅含 SYNCED
     expect(lastOpts!.apiKey).toBe('sk-plain-secret'); // 课程级解密值
@@ -462,10 +463,61 @@ describe('AI API (e2e)', () => {
     expect(typeof row.online).toBe('boolean');
   });
 
-  it('GET /api/user/ai-tutors 用户侧预留钩子返回 501 未实现（§4.2.6/§5.2）', async () => {
+  it('GET /api/user/ai-tutors 返回用户侧可用性列表且不含敏感字段（§4.2.6/§5.2）', async () => {
     const res = await request(app.getHttpServer())
       .get('/api/user/ai-tutors')
-      .expect(501);
-    expect(res.body.error).toBeTruthy();
+      .expect(200);
+    expect(Array.isArray(res.body.data)).toBe(true);
+    // 仅返回已映射 Portal 的课程（externalId 非空）；每条含 online/available 布尔值
+    for (const row of res.body.data) {
+      expect(typeof row.externalId).toBe('string');
+      expect(typeof row.online).toBe('boolean');
+      expect(typeof row.available).toBe('boolean');
+    }
+    expect(JSON.stringify(res.body)).not.toContain('apiKey');
+  });
+
+  it('POST /api/user/ai/chat-stream 学员端：只读 currentReleaseId + 语言指令 + Online 拦截', async () => {
+    await prisma.course.update({
+      where: { id: courseId },
+      data: {
+        externalId: 'ai-e2e-learner',
+        aiTutorOnline: true,
+        currentReleaseId: releaseId,
+        aiTestReleaseId: null,
+      },
+    });
+
+    lastOpts = null;
+    const res = await request(app.getHttpServer())
+      .post('/api/user/ai/chat-stream')
+      .send({
+        externalCourseId: 'ai-e2e-learner',
+        message: 'What is the argument?',
+        mode: 'LECTURE',
+        locale: 'en-GB',
+        history: [],
+      })
+      .expect(200);
+    expect(res.text).toContain('data: {"delta":"Hello"}');
+    expect(res.text).toContain('data: {"done":true}');
+    expect(lastOpts!.messages[0].content).toContain(
+      'Always answer in British English.',
+    );
+
+    await prisma.course.update({
+      where: { id: courseId },
+      data: { aiTutorOnline: false },
+    });
+    const offline = await request(app.getHttpServer())
+      .post('/api/user/ai/chat-stream')
+      .send({
+        externalCourseId: 'ai-e2e-learner',
+        message: 'hi',
+        mode: 'LECTURE',
+        locale: 'en-GB',
+      })
+      .expect(403);
+    expect(offline.body.error.message).toContain('未开放');
   });
 });

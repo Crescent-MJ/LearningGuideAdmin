@@ -13,6 +13,7 @@ const entry = {
   courseId: 'course-1',
   releaseId: 'release-1',
   mode: 'LECTURE' as const,
+  channel: 'admin' as const,
   provider: 'openrouter',
   model: 'openai/gpt-x',
   historyCount: 4,
@@ -42,6 +43,7 @@ describe('AiChatLogger（§4.4.2 第 7 步）', () => {
     expect(parsed.courseId).toBe('course-1');
     expect(parsed.releaseId).toBe('release-1');
     expect(parsed.mode).toBe('LECTURE');
+    expect(parsed.channel).toBe('admin');
     expect(parsed.model).toBe('openai/gpt-x');
     expect(parsed.status).toBe('ok');
     expect(parsed.questionChars).toBe(entry.question.length);
@@ -54,6 +56,7 @@ describe('AiChatLogger（§4.4.2 第 7 步）', () => {
       [
         'answer',
         'answerChars',
+        'channel',
         'courseId',
         'historyCount',
         'latencyMs',
