@@ -798,3 +798,21 @@
   HTTP 实测 `/zh-CN/settings` → 307 → `/settings/employee-account`，三个子页面均 200；
   SSR 侧栏顺序断言为「课程→知识库→AI 导师→订单→报表→学生→服务台→设置→员工账号→支付网关→通知配置」
 
+
+---
+
+## 2026-10-23 ~ 按 BackOffice 设计稿（6 张图）重做界面
+
+- **输入**：用户提供 PRD 对应设计稿截图：Menu & Role、Login、Employee Account、Employee Account add、Employee Account Edit
+- **设计还原要点**
+  - 顶栏：白底 56px 高的品牌条（蓝色圆角 logo + Learning Guide BackOffice）、右侧语言控件「EN ⌄」、头像 + 姓名/角色两行、员工下拉（Change Password / Sign Out，带图标）
+  - 侧栏：白底 186px，8 个线性图标 + 文案，当前项浅蓝底蓝字，顶部折叠按钮
+  - Settings：二级导航从「侧栏内嵌套」改为设计稿的**内容区左侧一列**（Employee Account / Payment Gateway / Notification Configuration）
+  - 员工账号页：标题 + 副标题 + 右上「+ Add Employee」；搜索框带放大镜、All Roles / All Status 下拉；表格表头灰底、状态圆点（绿/琥珀/灰）、行尾 ⋮ 菜单（Edit / Reset Password / Pending 追加 Resend Activation）；页脚「显示第 1–8 条，共 8 名员工」+ ‹ 1 › 分页
+  - 弹窗：标题 + 副标题 + 右上关闭；邮箱说明文案（新建=将发送激活邮件 / 已激活=不可修改）；Status 改为 Active/Inactive 分段卡片选择；按钮文案 Create Employee / Save Changes
+  - 登录页：改为**单页表单**（邮箱 + 密码同屏），输入框内嵌 mail / lock 图标，邮箱校验通过显示绿色对勾，密码右侧眼睛切换，左对齐 Forgot password?，整宽 Sign in 按钮；移除两步式与法律条款块
+- **新增文件**：`components/icons.tsx`（线性图标集）、`components/SettingsSubNav.tsx`
+- **重写文件**：`app/globals.css`（按设计稿重建令牌与组件样式）、`components/AppShell.tsx`、`components/AuthLayout.tsx`、`components/LocaleSwitch.tsx`、登录页、员工账号客户端
+- **验证**：`tsc` 0 error、`eslint` 0 warning、单测 47/47、`next build` 通过；
+  SSR 断言：侧栏 8 项、设置子导航 3 项、标题/搜索/表格/分页/文案均渲染
+

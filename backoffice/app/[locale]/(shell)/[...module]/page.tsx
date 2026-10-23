@@ -31,10 +31,10 @@ export default async function ModulePlaceholderPage({
   // PORT-NAV-004 / §15.3：直接输入 URL 也必须按权限拒绝
   if (!canViewMenu(employee.role, menu)) {
     return (
-      <section className="card">
+      <section className="card cardGrow">
         <h1 className="cardTitle">{t(safeLocale, "forbidden.title")}</h1>
         <p className="cardBody">{t(safeLocale, "forbidden.description")}</p>
-        <p>
+        <p style={{ marginTop: 12 }}>
           <a className="button buttonGhost" href={`/${safeLocale}/course`}>
             {t(safeLocale, "forbidden.backToCourse")}
           </a>
@@ -44,7 +44,7 @@ export default async function ModulePlaceholderPage({
   }
 
   return (
-    <section className="card">
+    <section className="card cardGrow">
       <h1 className="cardTitle">
         {t(safeLocale, "placeholder.title", { menu: t(safeLocale, MENU_LABEL[menu] ?? menu) })}
       </h1>

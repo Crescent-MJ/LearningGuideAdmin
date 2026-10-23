@@ -5,21 +5,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { ErrorCode } from "@/contracts/envelope";
 import { AuthLayout } from "@/components/AuthLayout";
+import { CheckIcon, EyeIcon, EyeOffIcon, LockIcon, MailIcon } from "@/components/icons";
 import type { Locale } from "@/lib/i18n/config";
 import { t } from "@/lib/i18n/messages";
 import { useLocale } from "@/lib/i18n/useLocale";
 
 type EmailCheckState = "idle" | "checking" | "eligible" | "notEligible";
-type Step = "email" | "password";
 
 const EMAIL_CHECK_DELAY_MS = 500;
-const PORTAL_URL = "https://www.ilovelearningguide.com";
 
 export default function SignInPage() {
   const locale = useLocale();
   const router = useRouter();
 
-  const [step, setStep] = useState<Step>("email");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -28,13 +26,11 @@ export default function SignInPage() {
   const [submitting, setSubmitting] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const emailRef = useRef<HTMLInputElement>(null);
-  const passwordRef = useRef<HTMLInputElement>(null);
 
   // 不用 autoFocus：SSR 会输出 autofocus 属性，客户端补水时属性不一致会触发 React 警告
   useEffect(() => {
-    if (step === "email") emailRef.current?.focus();
-    else passwordRef.current?.focus();
-  }, [step]);
+    emailRef.current?.focus();
+  }, []);
 
   const runEmailCheck = useCallback(async (value: string) => {
     setEmailState("checking");
@@ -66,45 +62,34 @@ export default function SignInPage() {
     };
   }, [email, runEmailCheck]);
 
-  /** PORT-LOG-002 / PORT-LOG-003：先校验邮箱，通过后才进入密码步骤。 */
-  async function handleEmailStep(event: React.FormEvent<HTMLFormElement>) {
+  /** PORT-LOG-002：提交前确认邮箱属于可用员工账号，再提交密码。 */
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setErrorCode(null);
     setSubmitting(true);
+
     try {
-      const response = await fetch("/api/auth/email-check", {
+      const check = await fetch("/api/auth/email-check", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email }),
       });
-      const payload = (await response.json()) as {
+      const checkPayload = (await check.json()) as {
         success: boolean;
         data: { eligible: boolean } | null;
         error: ErrorCode | null;
       };
-      if (!payload.success) {
-        setErrorCode(payload.error ?? "INTERNAL_ERROR");
+      if (!checkPayload.success) {
+        setErrorCode(checkPayload.error ?? "INTERNAL_ERROR");
         return;
       }
-      if (!payload.data?.eligible) {
+      if (!checkPayload.data?.eligible) {
         setEmailState("notEligible");
         setErrorCode("INVALID_EMPLOYEE_ACCOUNT");
         return;
       }
       setEmailState("eligible");
-      setStep("password");
-    } catch {
-      setErrorCode("INTERNAL_ERROR");
-    } finally {
-      setSubmitting(false);
-    }
-  }
 
-  async function handlePasswordStep(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setErrorCode(null);
-    setSubmitting(true);
-    try {
       const response = await fetch("/api/auth/sign-in", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -130,88 +115,54 @@ export default function SignInPage() {
     }
   }
 
-  const backHref = `${PORTAL_URL}/${locale}/portal`;
-  const backLabel = t(locale, "signIn.portalBack");
-
-  const errorAlert = errorCode ? (
-    <div className="alert alertError">{t(locale, `errors.${errorCode}`)}</div>
-  ) : null;
-
-  if (step === "email") {
-    return (
-      <AuthLayout
-        title={t(locale, "signIn.title")}
-        subtitle={t(locale, "signIn.emailStepSubtitle")}
-        backHref={backHref}
-        backLabel={backLabel}
-        showLegal
-      >
-        <form onSubmit={handleEmailStep} noValidate>
-          <div className="field" style={{ marginBottom: 14 }}>
-            <span className="fieldLabel">{t(locale, "signIn.emailLabel")}</span>
-            <div className="inputRow">
-              <input
-                className="fieldInput"
-                type="email"
-                name="email"
-                autoComplete="username"
-                ref={emailRef}
-                placeholder={t(locale, "signIn.emailPlaceholder")}
-                value={email}
-                onChange={(event) => {
-                  setEmail(event.target.value);
-                  setErrorCode(null);
-                }}
-                required
-              />
-              <button className="button" type="submit" disabled={submitting}>
-                {submitting ? t(locale, "signIn.checking") : t(locale, "signIn.continue")}
-              </button>
-            </div>
-          </div>
-
-          <div className="hintRow">
-            {emailState === "checking" ? (
-              <span className="hintMuted">{t(locale, "signIn.checking")}</span>
-            ) : null}
-            {emailState === "eligible" ? (
-              <span className="hintOk">✓ {t(locale, "signIn.validEmployee")}</span>
-            ) : null}
-            {emailState === "notEligible" && !errorCode ? (
-              <span className="hintBad">! {t(locale, "signIn.invalidEmployee")}</span>
-            ) : null}
-          </div>
-
-          {errorAlert}
-
-          <p className="modalHint" style={{ marginTop: 12 }}>
-            {t(locale, "signIn.subtitle")}
-          </p>
-        </form>
-      </AuthLayout>
-    );
-  }
-
   return (
-    <AuthLayout
-      title={t(locale, "signIn.title")}
-      subtitle={email}
-      backHref={backHref}
-      backLabel={backLabel}
-      showLegal
-    >
-      <form onSubmit={handlePasswordStep} noValidate>
-        {errorAlert}
-
-        <div className="field" style={{ marginBottom: 14 }}>
-          <span className="fieldLabel">{t(locale, "signIn.passwordLabel")}</span>
-          <div className="inputRow">
+    <AuthLayout title={t(locale, "signIn.title")} subtitle={t(locale, "signIn.subtitle")}>
+      <form onSubmit={submit} noValidate>
+        <div className="field">
+          <label className="fieldLabel" htmlFor="sign-in-email">
+            {t(locale, "signIn.emailLabel")}
+          </label>
+          <div className="inputShell">
+            <span className="inputShellIcon">
+              <MailIcon size={15} />
+            </span>
             <input
-              className="fieldInput"
+              id="sign-in-email"
+              className="inputShellInput"
+              type="email"
+              name="email"
+              autoComplete="username"
+              ref={emailRef}
+              placeholder={t(locale, "signIn.emailPlaceholder")}
+              value={email}
+              onChange={(event) => {
+                setEmail(event.target.value);
+                setErrorCode(null);
+              }}
+              required
+            />
+            {emailState === "eligible" ? (
+              <span className="validMark" title={t(locale, "signIn.validEmployee")}>
+                <CheckIcon size={11} />
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="field" style={{ marginBottom: 10 }}>
+          <label className="fieldLabel" htmlFor="sign-in-password">
+            {t(locale, "signIn.passwordLabel")}
+          </label>
+          <div className="inputShell">
+            <span className="inputShellIcon">
+              <LockIcon size={15} />
+            </span>
+            <input
+              id="sign-in-password"
+              className="inputShellInput"
               type={showPassword ? "text" : "password"}
               name="password"
               autoComplete="current-password"
-              ref={passwordRef}
               placeholder={t(locale, "signIn.passwordPlaceholder")}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
@@ -219,42 +170,34 @@ export default function SignInPage() {
             />
             <button
               type="button"
-              className="button buttonGhost buttonSmall"
+              className="iconButton"
               onClick={() => setShowPassword((current) => !current)}
+              aria-label={
+                showPassword ? t(locale, "signIn.hidePassword") : t(locale, "signIn.showPassword")
+              }
+              title={
+                showPassword ? t(locale, "signIn.hidePassword") : t(locale, "signIn.showPassword")
+              }
             >
-              {showPassword ? t(locale, "signIn.hidePassword") : t(locale, "signIn.showPassword")}
+              {showPassword ? <EyeOffIcon size={15} /> : <EyeIcon size={15} />}
             </button>
           </div>
         </div>
 
-        <button className="button" type="submit" disabled={submitting} style={{ width: "100%" }}>
-          {submitting ? t(locale, "signIn.submitting") : t(locale, "signIn.submit")}
-        </button>
-
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 12,
-            marginTop: 12,
-            fontSize: 13,
-          }}
-        >
-          <button
-            type="button"
-            className="linkButton"
-            onClick={() => {
-              setStep("email");
-              setPassword("");
-              setErrorCode(null);
-            }}
-          >
-            ← {t(locale, "signIn.changeEmail")}
-          </button>
+        <div className="authFormFootnote">
           <a className="linkButton" href={`/${locale}/forgot-password`}>
             {t(locale, "signIn.forgotPassword")}
           </a>
+          {emailState === "notEligible" && !errorCode ? (
+            <span className="fieldHint">{t(locale, "signIn.invalidEmployee")}</span>
+          ) : null}
         </div>
+
+        {errorCode ? <div className="alert alertError">{t(locale, `errors.${errorCode}`)}</div> : null}
+
+        <button className="button buttonBlock" type="submit" disabled={submitting}>
+          {submitting ? t(locale, "signIn.submitting") : t(locale, "signIn.submit")}
+        </button>
       </form>
     </AuthLayout>
   );

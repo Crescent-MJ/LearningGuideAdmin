@@ -8,7 +8,7 @@ export default async function CoursePage({
   const safeLocale = isLocale(locale) ? locale : DEFAULT_LOCALE;
 
   return (
-    <section className="card">
+    <section className="card cardGrow">
       <h1 className="cardTitle">{t(safeLocale, "course.title")}</h1>
       <p className="cardBody">{t(safeLocale, "course.description")}</p>
     </section>

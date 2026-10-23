@@ -3,15 +3,16 @@
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { ChevronDownIcon } from "@/components/icons";
 import { localeHref, otherLocale } from "@/lib/i18n/config";
 import { useLocale } from "@/lib/i18n/useLocale";
 
-/** 与 Portal 一致：胶囊显示当前语言的短名（EN / 中），点击切到另一种语言。 */
-const SHORT_LABEL = { "en-GB": "EN", "zh-CN": "中" } as const;
+/** 设计稿顶栏语言控件：当前语言短名 + 下拉箭头，点击切到另一种语言。 */
+const SHORT_LABEL = { "en-GB": "EN", "zh-CN": "中文" } as const;
 
 export function LocaleSwitch({
   persist,
-  className = "localeChip",
+  className = "localeButton",
 }: {
   persist: boolean;
   className?: string;
@@ -49,6 +50,7 @@ export function LocaleSwitch({
       title={`Switch language to ${target}`}
     >
       {SHORT_LABEL[locale]}
+      <ChevronDownIcon size={14} />
     </button>
   );
 }

@@ -6,28 +6,40 @@ import { useState } from "react";
 import type { ErrorCode } from "@/contracts/envelope";
 import type { EmployeeRole } from "@/contracts/employee";
 import { LocaleSwitch } from "@/components/LocaleSwitch";
+import {
+  AiTutorIcon,
+  BrandMark,
+  CloseIcon,
+  CourseIcon,
+  HelpDeskIcon,
+  KeyIcon,
+  KnowledgeIcon,
+  OrderIcon,
+  PanelToggleIcon,
+  ReportingIcon,
+  SettingsIcon,
+  SignOutIcon,
+  StudentIcon,
+} from "@/components/icons";
 import type { Locale } from "@/lib/i18n/config";
 import { t } from "@/lib/i18n/messages";
 import { useLocale } from "@/lib/i18n/useLocale";
 import {
   menuFromPathSegments,
   menuHref,
-  settingsSubHref,
   visibleMenus,
-  visibleSettingsSubs,
   type MenuKey,
-  type SettingsSubKey,
 } from "@/modules/rbac/permissions";
 
-const MENU_ICON: Record<MenuKey, string> = {
-  course: "▤",
-  knowledge: "▦",
-  aiTutor: "◆",
-  order: "▣",
-  reporting: "▥",
-  student: "●",
-  helpDesk: "◈",
-  settings: "⚙",
+const MENU_ICON: Record<MenuKey, (props: { size?: number }) => React.ReactElement> = {
+  course: CourseIcon,
+  knowledge: KnowledgeIcon,
+  aiTutor: AiTutorIcon,
+  order: OrderIcon,
+  reporting: ReportingIcon,
+  student: StudentIcon,
+  helpDesk: HelpDeskIcon,
+  settings: SettingsIcon,
 };
 
 const MENU_LABEL: Record<MenuKey, string> = {
@@ -39,12 +51,6 @@ const MENU_LABEL: Record<MenuKey, string> = {
   student: "nav.student",
   helpDesk: "nav.helpDesk",
   settings: "nav.settings",
-};
-
-const SETTINGS_SUB_LABEL: Record<SettingsSubKey, string> = {
-  employeeAccount: "nav.employeeAccount",
-  paymentGateway: "nav.paymentGateway",
-  notificationConfiguration: "nav.notificationConfiguration",
 };
 
 export type ShellEmployee = {
@@ -67,10 +73,9 @@ export function AppShell({
   const [collapsed, setCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const menus = visibleMenus(employee.role);
-  const settingsExpanded = !collapsed && (settingsOpen || activeMenu === "settings");
+  const roleLabel = t(locale, `roles.${employee.role}`);
 
   async function signOut() {
     await fetch("/api/auth/sign-out", { method: "POST" });
@@ -81,8 +86,7 @@ export function AppShell({
   return (
     <div className={collapsed ? "shell shellCollapsed" : "shell"}>
       <nav className="sidebar" aria-label={t(locale, "app.subtitle")}>
-        <div className="sidebarBrand">
-          {collapsed ? null : <span>{t(locale, "app.name")}</span>}
+        <div className="sidebarTop">
           <button
             type="button"
             className="sidebarToggle"
@@ -90,62 +94,12 @@ export function AppShell({
             title={t(locale, collapsed ? "shell.expand" : "shell.collapse")}
             onClick={() => setCollapsed((value) => !value)}
           >
-            {collapsed ? "»" : "«"}
+            <PanelToggleIcon size={16} />
           </button>
         </div>
 
         {menus.map((menu) => {
-          if (menu === "settings") {
-            return (
-              <div key={menu} className="navGroup">
-                <button
-                  type="button"
-                  className={activeMenu === "settings" ? "navItem navItemActive" : "navItem"}
-                  title={t(locale, MENU_LABEL.settings)}
-                  aria-expanded={settingsExpanded}
-                  onClick={() => {
-                    if (collapsed) {
-                      router.push(menuHref(locale, "settings"));
-                      return;
-                    }
-                    setSettingsOpen((value) => !value);
-                  }}
-                >
-                  <span className="navIcon" aria-hidden="true">
-                    {MENU_ICON.settings}
-                  </span>
-                  {collapsed ? null : (
-                    <>
-                      <span>{t(locale, MENU_LABEL.settings)}</span>
-                      <span className="navChevron" aria-hidden="true">
-                        {settingsExpanded ? "▾" : "▸"}
-                      </span>
-                    </>
-                  )}
-                </button>
-
-                {settingsExpanded ? (
-                  <div className="navSubGroup">
-                    {visibleSettingsSubs(employee.role).map((sub) => {
-                      const href = settingsSubHref(locale, sub);
-                      return (
-                        <a
-                          key={sub}
-                          className={
-                            pathname === href ? "navSubItem navSubItemActive" : "navSubItem"
-                          }
-                          href={href}
-                        >
-                          {t(locale, SETTINGS_SUB_LABEL[sub])}
-                        </a>
-                      );
-                    })}
-                  </div>
-                ) : null}
-              </div>
-            );
-          }
-
+          const Icon = MENU_ICON[menu];
           return (
             <a
               key={menu}
@@ -153,8 +107,8 @@ export function AppShell({
               href={menuHref(locale, menu)}
               title={t(locale, MENU_LABEL[menu])}
             >
-              <span className="navIcon" aria-hidden="true">
-                {MENU_ICON[menu]}
+              <span className="navIcon">
+                <Icon size={16} />
               </span>
               {collapsed ? null : <span>{t(locale, MENU_LABEL[menu])}</span>}
             </a>
@@ -166,66 +120,50 @@ export function AppShell({
         <header className="header">
           {/* PORT-NAV-001：共享顶部栏展示 logo 与产品名 */}
           <span className="headerBrand">
-            <span className="brandMark" aria-hidden="true">
-              LG
-            </span>
+            <BrandMark size={26} />
             {t(locale, "app.name")}
-            <span className="headerBrandSub">
-              {activeMenu ? t(locale, MENU_LABEL[activeMenu]) : t(locale, "app.subtitle")}
-            </span>
           </span>
 
           <div className="headerRight">
             <LocaleSwitch persist />
 
-            <span className="employeeName">{employee.displayName}</span>
-            <span className="roleTag">{t(locale, `roles.${employee.role}`)}</span>
-
             <div style={{ position: "relative" }}>
               <button
                 type="button"
-                className="button buttonGhost buttonSmall"
+                className="employeeTrigger"
                 onClick={() => setMenuOpen((value) => !value)}
+                aria-expanded={menuOpen}
+                aria-label={t(locale, "shell.employeeMenu")}
               >
-                {t(locale, "shell.employeeMenu")} ▾
+                <span className="avatar" aria-hidden="true">
+                  {employee.displayName.slice(0, 1).toUpperCase()}
+                </span>
+                <span className="employeeMeta">
+                  <span className="employeeName">{employee.displayName}</span>
+                  <span className="employeeRole">{roleLabel}</span>
+                </span>
               </button>
 
               {menuOpen ? (
-                <div
-                  className="card"
-                  style={{
-                    position: "absolute",
-                    right: 0,
-                    top: "calc(100% + 8px)",
-                    width: 220,
-                    padding: 8,
-                    zIndex: 40,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: 4,
-                  }}
-                >
-                  <div className="modalHint" style={{ padding: "6px 8px" }}>
-                    {employee.loginEmail}
-                  </div>
+                <div className="dropdown">
+                  {/* PORT-NAV-005：员工下拉只含 Change Password 与 Sign Out */}
                   <button
                     type="button"
-                    className="navItem"
-                    style={{ color: "var(--text)" }}
+                    className="dropdownItem"
                     onClick={() => {
                       setMenuOpen(false);
                       setPasswordOpen(true);
                     }}
                   >
+                    <KeyIcon size={14} />
                     {t(locale, "shell.changePassword")}
                   </button>
-                  {/* PORT-NAV-005：员工下拉只含 Change Password 与 Sign Out */}
                   <button
                     type="button"
-                    className="navItem"
-                    style={{ color: "var(--danger)" }}
+                    className="dropdownItem dropdownItemDanger"
                     onClick={() => void signOut()}
                   >
+                    <SignOutIcon size={14} />
                     {t(locale, "shell.signOut")}
                   </button>
                 </div>
@@ -286,7 +224,15 @@ function ChangePasswordDialog({ locale, onClose }: { locale: Locale; onClose: ()
   return (
     <div className="modalBackdrop">
       <form className="modal" onSubmit={submit} noValidate>
-        <h2 className="modalTitle">{t(locale, "changePassword.title")}</h2>
+        <div className="modalHead">
+          <div>
+            <h2 className="modalTitle">{t(locale, "changePassword.title")}</h2>
+            <p className="modalSubtitle">{t(locale, "changePassword.subtitle")}</p>
+          </div>
+          <button type="button" className="iconButton" onClick={onClose} aria-label={t(locale, "common.cancel")}>
+            <CloseIcon size={16} />
+          </button>
+        </div>
 
         {errorCode ? (
           <div className="alert alertError">{t(locale, `errors.${errorCode}`)}</div>

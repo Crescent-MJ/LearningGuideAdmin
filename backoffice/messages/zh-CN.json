@@ -49,7 +49,7 @@
   },
   "signIn": {
     "title": "登录",
-    "subtitle": "仅支持员工邮箱与密码登录，不提供自助注册。",
+    "subtitle": "仅供内部员工使用，不对外提供注册。",
     "emailLabel": "邮箱",
     "emailPlaceholder": "name@example.com",
     "emailStepSubtitle": "请输入员工邮箱以继续。",
@@ -108,6 +108,7 @@
   },
   "changePassword": {
     "title": "修改密码",
+    "subtitle": "请输入当前密码并设置新密码。",
     "currentLabel": "当前密码",
     "newLabel": "新密码",
     "confirmLabel": "确认新密码",
@@ -140,11 +141,18 @@
   },
   "employees": {
     "title": "员工账号",
-    "subtitle": "创建与维护后台员工账号，仅管理员可进入本页。",
+    "subtitle": "管理后台员工账号、角色与访问权限。",
     "addEmployee": "新增员工",
-    "searchPlaceholder": "按邮箱搜索",
+    "createAction": "创建员工",
+    "saveAction": "保存更改",
+    "searchPlaceholder": "按邮箱搜索…",
     "allRoles": "全部角色",
     "allStatus": "全部状态",
+    "rolePlaceholder": "请选择角色",
+    "newSubtitle": "创建新的员工账号，并为其指定角色与状态。",
+    "editSubtitle": "更新该员工的角色与状态。",
+    "hintActivation": "激活邮件将发送到该邮箱。账号激活后，邮箱不可再修改。",
+    "hintEmailVerified": "该邮箱已激活，不可修改。",
     "columns": {
       "email": "登录邮箱",
       "role": "角色",
@@ -154,7 +162,7 @@
     },
     "neverSignedIn": "—",
     "empty": "没有符合当前搜索与筛选条件的员工账号。",
-    "showing": "显示第 {from}–{to} 条，共 {total} 条",
+    "showing": "显示第 {from}–{to} 条，共 {total} 名员工",
     "actions": {
       "edit": "编辑",
       "resetPassword": "重置密码",

@@ -49,7 +49,7 @@
   },
   "signIn": {
     "title": "Sign in",
-    "subtitle": "Employee email and password only. Self-registration is not available.",
+    "subtitle": "For internal employees only; no external registration.",
     "emailLabel": "Email",
     "emailPlaceholder": "name@example.com",
     "emailStepSubtitle": "Enter your employee email to continue.",
@@ -108,6 +108,7 @@
   },
   "changePassword": {
     "title": "Change Password",
+    "subtitle": "Enter your current password and choose a new one.",
     "currentLabel": "Current password",
     "newLabel": "New password",
     "confirmLabel": "Confirm new password",
@@ -140,11 +141,18 @@
   },
   "employees": {
     "title": "Employee Account",
-    "subtitle": "Create and maintain BackOffice employee accounts. Only administrators can open this page.",
+    "subtitle": "Manage backoffice employee accounts, roles and access permissions.",
     "addEmployee": "Add Employee",
-    "searchPlaceholder": "Search by email",
+    "createAction": "Create Employee",
+    "saveAction": "Save Changes",
+    "searchPlaceholder": "Search by email...",
     "allRoles": "All Roles",
     "allStatus": "All Status",
+    "rolePlaceholder": "Select role",
+    "newSubtitle": "Create a new employee account and assign their role and status.",
+    "editSubtitle": "Update this employee's role and status.",
+    "hintActivation": "An activation email will be sent to this email address. Once activated, the email address cannot be changed.",
+    "hintEmailVerified": "This email address has been activated and cannot be changed.",
     "columns": {
       "email": "Login Email",
       "role": "Role",
@@ -154,7 +162,7 @@
     },
     "neverSignedIn": "—",
     "empty": "No employee accounts match the current search and filters.",
-    "showing": "Showing {from}–{to} of {total}",
+    "showing": "Showing {from}–{to} of {total} employees",
     "actions": {
       "edit": "Edit",
       "resetPassword": "Reset Password",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ErrorCode } from "@/contracts/envelope";
 import {
@@ -9,33 +9,65 @@ import {
   type AccountStatus,
   type EmployeeRole,
 } from "@/contracts/employee";
+import {
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  CloseIcon,
+  DotsIcon,
+  PlusIcon,
+  SearchIcon,
+} from "@/components/icons";
 import type { Locale } from "@/lib/i18n/config";
 import { t } from "@/lib/i18n/messages";
-import type { EmployeeListItem, EmployeeListResult } from "@/modules/employee-account/services/employeeAccount";
+import type {
+  EmployeeListItem,
+  EmployeeListResult,
+} from "@/modules/employee-account/services/employeeAccount";
 
-const PAGE_SIZE = 10;
+/** 设计稿默认一页 8 行。 */
+const PAGE_SIZE = 8;
 
 type Filters = { email: string; role: string; status: string };
 
 type EditorState =
-  | { mode: "create"; email: string; role: EmployeeRole; accountStatus: AccountStatus }
-  | { mode: "edit"; employee: EmployeeListItem; email: string; role: EmployeeRole; accountStatus: AccountStatus }
-  | null;
+  | { mode: "create"; email: string; role: EmployeeRole | ""; accountStatus: AccountStatus }
+  | {
+      mode: "edit";
+      employee: EmployeeListItem;
+      email: string;
+      role: EmployeeRole;
+      accountStatus: AccountStatus;
+    };
+
+const EMPTY_FILTERS: Filters = { email: "", role: "", status: "" };
+
+function formatLastLogin(value: string | null, locale: Locale): string {
+  if (!value) return "—";
+  // PRD 只要求展示最近一次成功登录时间，未规定时区，这里按浏览器本地时区显示
+  return new Intl.DateTimeFormat(locale, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  })
+    .format(new Date(value))
+    .replace(",", "");
+}
 
 export function EmployeeAccountClient({ locale }: { locale: Locale }) {
-  const [filters, setFilters] = useState<Filters>({ email: "", role: "", status: "" });
-  const [appliedFilters, setAppliedFilters] = useState<Filters>({
-    email: "",
-    role: "",
-    status: "",
-  });
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState<Filters>(EMPTY_FILTERS);
   const [page, setPage] = useState(1);
   const [data, setData] = useState<EmployeeListResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorCode, setErrorCode] = useState<ErrorCode | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [editor, setEditor] = useState<EditorState>(null);
+  const [editor, setEditor] = useState<EditorState | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,9 +100,29 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
     void load();
   }, [load]);
 
+  // PORT-LST-002：邮箱支持部分匹配，输入停 300ms 后自动查询
+  function onEmailChange(value: string) {
+    setFilters((current) => ({ ...current, email: value }));
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      setPage(1);
+      setAppliedFilters((current) => ({ ...current, email: value }));
+    }, 300);
+  }
+
+  function onSelectChange(key: "role" | "status", value: string) {
+    setFilters((current) => ({ ...current, [key]: value }));
+    setPage(1);
+    setAppliedFilters((current) => ({ ...current, [key]: value }));
+  }
+
   async function submitEditor(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!editor) return;
+    if (editor.role === "") {
+      setErrorCode("INVALID_INPUT");
+      return;
+    }
     setSubmitting(true);
     setErrorCode(null);
 
@@ -79,9 +131,12 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
       const url = isCreate
         ? "/api/admin/employees"
         : `/api/admin/employees/${editor.employee.employeeId}`;
-      const body = isCreate
-        ? { email: editor.email, role: editor.role, accountStatus: editor.accountStatus, locale }
-        : { email: editor.email, role: editor.role, accountStatus: editor.accountStatus, locale };
+      const body = {
+        email: editor.email,
+        role: editor.role,
+        accountStatus: editor.accountStatus,
+        locale,
+      };
 
       const response = await fetch(url, {
         method: isCreate ? "POST" : "PATCH",
@@ -99,9 +154,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
       }
 
       setNotice(
-        isCreate
-          ? t(locale, "employees.results.created")
-          : t(locale, "employees.results.updated")
+        isCreate ? t(locale, "employees.results.created") : t(locale, "employees.results.updated")
       );
       setEditor(null);
       await load();
@@ -118,6 +171,7 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
   ) {
     setErrorCode(null);
     setNotice(null);
+    setOpenMenuId(null);
     try {
       const response = await fetch(`/api/admin/employees/${employee.employeeId}/${action}`, {
         method: "POST",
@@ -147,14 +201,18 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
 
   const from = data && data.total > 0 ? (data.page - 1) * data.pageSize + 1 : 0;
   const to = data ? Math.min(data.page * data.pageSize, data.total) : 0;
+  const totalPages = useMemo(() => {
+    if (!data || data.total === 0) return 1;
+    return Math.max(1, Math.ceil(data.total / data.pageSize));
+  }, [data]);
 
   return (
-    <section className="card">
-      <div className="toolbar">
-        <h1 className="cardTitle" style={{ margin: 0 }}>
-          {t(locale, "employees.title")}
-        </h1>
-        <div className="toolbarSpacer" />
+    <section className="card cardGrow">
+      <div className="pageHead">
+        <div>
+          <h1 className="cardTitle">{t(locale, "employees.title")}</h1>
+          <p className="cardSubtitle">{t(locale, "employees.subtitle")}</p>
+        </div>
         <button
           type="button"
           className="button"
@@ -162,32 +220,32 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
             setEditor({
               mode: "create",
               email: "",
-              role: "COURSE_CREATOR",
+              role: "",
               accountStatus: "ACTIVE",
             })
           }
         >
+          <PlusIcon size={14} />
           {t(locale, "employees.addEmployee")}
         </button>
       </div>
 
-      <p className="cardBody" style={{ marginBottom: 16 }}>
-        {t(locale, "employees.subtitle")}
-      </p>
-
-      <div className="toolbar">
-        <input
-          className="fieldInput"
-          style={{ maxWidth: 260 }}
-          placeholder={t(locale, "employees.searchPlaceholder")}
-          value={filters.email}
-          onChange={(event) => setFilters({ ...filters, email: event.target.value })}
-        />
+      <div className="filters">
+        <label className="searchField">
+          <SearchIcon size={15} />
+          <input
+            type="search"
+            placeholder={t(locale, "employees.searchPlaceholder")}
+            value={filters.email}
+            onChange={(event) => onEmailChange(event.target.value)}
+            aria-label={t(locale, "employees.searchPlaceholder")}
+          />
+        </label>
         <select
-          className="fieldSelect"
-          style={{ maxWidth: 190 }}
+          className="filterSelect"
           value={filters.role}
-          onChange={(event) => setFilters({ ...filters, role: event.target.value })}
+          onChange={(event) => onSelectChange("role", event.target.value)}
+          aria-label={t(locale, "employees.allRoles")}
         >
           <option value="">{t(locale, "employees.allRoles")}</option>
           {EMPLOYEE_ROLES.map((role) => (
@@ -197,10 +255,10 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
           ))}
         </select>
         <select
-          className="fieldSelect"
-          style={{ maxWidth: 170 }}
+          className="filterSelect"
           value={filters.status}
-          onChange={(event) => setFilters({ ...filters, status: event.target.value })}
+          onChange={(event) => onSelectChange("status", event.target.value)}
+          aria-label={t(locale, "employees.allStatus")}
         >
           <option value="">{t(locale, "employees.allStatus")}</option>
           {DISPLAY_STATUSES.map((status) => (
@@ -209,140 +267,145 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
             </option>
           ))}
         </select>
-        <button
-          type="button"
-          className="button buttonGhost"
-          onClick={() => {
-            setPage(1);
-            setAppliedFilters(filters);
-          }}
-        >
-          {t(locale, "common.search")}
-        </button>
-        <button
-          type="button"
-          className="button buttonGhost"
-          onClick={() => {
-            const cleared = { email: "", role: "", status: "" };
-            setFilters(cleared);
-            setAppliedFilters(cleared);
-            setPage(1);
-          }}
-        >
-          {t(locale, "common.reset")}
-        </button>
       </div>
 
       {errorCode ? <div className="alert alertError">{t(locale, `errors.${errorCode}`)}</div> : null}
       {notice ? <div className="alert alertOk">{notice}</div> : null}
 
-      <table className="table">
-        <thead>
-          <tr>
-            <th>{t(locale, "employees.columns.email")}</th>
-            <th>{t(locale, "employees.columns.role")}</th>
-            <th>{t(locale, "employees.columns.status")}</th>
-            <th>{t(locale, "employees.columns.lastLogin")}</th>
-            <th>{t(locale, "employees.columns.actions")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {loading ? (
+      <div className="tableWrap">
+        <table className="table">
+          <thead>
             <tr>
-              <td colSpan={5}>{t(locale, "common.loading")}</td>
+              <th>{t(locale, "employees.columns.email")}</th>
+              <th>{t(locale, "employees.columns.role")}</th>
+              <th>{t(locale, "employees.columns.status")}</th>
+              <th>{t(locale, "employees.columns.lastLogin")}</th>
+              <th>{t(locale, "employees.columns.actions")}</th>
             </tr>
-          ) : null}
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr>
+                <td colSpan={5}>{t(locale, "common.loading")}</td>
+              </tr>
+            ) : null}
 
-          {!loading && data && data.items.length === 0 ? (
-            <tr>
-              <td colSpan={5}>{t(locale, "employees.empty")}</td>
-            </tr>
-          ) : null}
+            {!loading && data && data.items.length === 0 ? (
+              <tr>
+                <td colSpan={5}>{t(locale, "employees.empty")}</td>
+              </tr>
+            ) : null}
 
-          {!loading && data
-            ? data.items.map((employee) => (
-                <tr key={employee.employeeId}>
-                  <td>{employee.loginEmail}</td>
-                  <td>{t(locale, `roles.${employee.role}`)}</td>
-                  <td>
-                    <span className="statusPill">
-                      <span
-                        className={
-                          employee.displayStatus === "Active"
-                            ? "dot dotActive"
-                            : employee.displayStatus === "Pending"
-                              ? "dot dotPending"
-                              : "dot dotInactive"
-                        }
-                        aria-hidden="true"
-                      />
-                      {t(locale, `status.${employee.displayStatus}`)}
-                    </span>
-                  </td>
-                  <td>
-                    {employee.lastLoginAt
-                      ? new Date(employee.lastLoginAt).toISOString().slice(0, 16).replace("T", " ")
-                      : t(locale, "employees.neverSignedIn")}
-                  </td>
-                  <td>
-                    <div className="rowActions">
-                      <button
-                        type="button"
-                        className="button buttonGhost buttonSmall"
-                        onClick={() =>
-                          setEditor({
-                            mode: "edit",
-                            employee,
-                            email: employee.loginEmail,
-                            role: employee.role,
-                            accountStatus: employee.accountStatus,
-                          })
-                        }
-                      >
-                        {t(locale, "employees.actions.edit")}
-                      </button>
-                      <button
-                        type="button"
-                        className="button buttonGhost buttonSmall"
-                        onClick={() => void runAction(employee, "reset-password")}
-                      >
-                        {t(locale, "employees.actions.resetPassword")}
-                      </button>
-                      {employee.displayStatus === "Pending" ? (
+            {!loading && data
+              ? data.items.map((employee) => (
+                  <tr key={employee.employeeId}>
+                    <td>{employee.loginEmail}</td>
+                    <td>{t(locale, `roles.${employee.role}`)}</td>
+                    <td>
+                      <span className="statusPill">
+                        <span
+                          className={
+                            employee.displayStatus === "Active"
+                              ? "dot dotActive"
+                              : employee.displayStatus === "Pending"
+                                ? "dot dotPending"
+                                : "dot dotInactive"
+                          }
+                          aria-hidden="true"
+                        />
+                        {t(locale, `status.${employee.displayStatus}`)}
+                      </span>
+                    </td>
+                    <td suppressHydrationWarning>{formatLastLogin(employee.lastLoginAt, locale)}</td>
+                    <td>
+                      <div className="rowMenuWrap">
                         <button
                           type="button"
-                          className="button buttonGhost buttonSmall"
-                          onClick={() => void runAction(employee, "resend-activation")}
+                          className="iconButton"
+                          aria-label={t(locale, "common.actions")}
+                          aria-expanded={openMenuId === employee.employeeId}
+                          onClick={() =>
+                            setOpenMenuId((current) =>
+                              current === employee.employeeId ? null : employee.employeeId
+                            )
+                          }
                         >
-                          {t(locale, "employees.actions.resendActivation")}
+                          <DotsIcon size={15} />
                         </button>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
-              ))
-            : null}
-        </tbody>
-      </table>
+
+                        {openMenuId === employee.employeeId ? (
+                          <div className="rowMenu">
+                            <button
+                              type="button"
+                              className="rowMenuItem"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                setEditor({
+                                  mode: "edit",
+                                  employee,
+                                  email: employee.loginEmail,
+                                  role: employee.role,
+                                  accountStatus: employee.accountStatus,
+                                });
+                              }}
+                            >
+                              {t(locale, "employees.actions.edit")}
+                            </button>
+                            <button
+                              type="button"
+                              className="rowMenuItem"
+                              onClick={() => void runAction(employee, "reset-password")}
+                            >
+                              {t(locale, "employees.actions.resetPassword")}
+                            </button>
+                            {employee.displayStatus === "Pending" ? (
+                              <button
+                                type="button"
+                                className="rowMenuItem"
+                                onClick={() => void runAction(employee, "resend-activation")}
+                              >
+                                {t(locale, "employees.actions.resendActivation")}
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              : null}
+          </tbody>
+        </table>
+      </div>
 
       <div className="pagination">
         <span>{t(locale, "employees.showing", { from, to, total: data?.total ?? 0 })}</span>
-        <span className="rowActions">
+        <span className="pager">
           <button
             type="button"
-            className="button buttonGhost buttonSmall"
+            className="pagerButton"
             disabled={page <= 1}
+            aria-label={t(locale, "common.previous")}
             onClick={() => setPage((value) => Math.max(1, value - 1))}
           >
-            {t(locale, "common.previous")}
+            <ChevronLeftIcon size={14} />
           </button>
           <button
             type="button"
-            className="button buttonGhost buttonSmall"
-            disabled={!data || page * data.pageSize >= data.total}
-            onClick={() => setPage((value) => value + 1)}
+            className="pagerButton pagerCurrent"
+            aria-current="page"
+            onClick={() => setPage((value) => Math.min(totalPages, value))}
           >
-            {t(locale, "common.next")}
+            {page}
+          </button>
+          <button
+            type="button"
+            className="pagerButton"
+            disabled={page >= totalPages}
+            aria-label={t(locale, "common.next")}
+            onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+          >
+            <ChevronRightIcon size={14} />
           </button>
         </span>
       </div>
@@ -350,11 +413,28 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
       {editor ? (
         <div className="modalBackdrop">
           <form className="modal" onSubmit={submitEditor} noValidate>
-            <h2 className="modalTitle">
-              {editor.mode === "create"
-                ? t(locale, "employees.newTitle")
-                : t(locale, "employees.editTitle")}
-            </h2>
+            <div className="modalHead">
+              <div>
+                <h2 className="modalTitle">
+                  {editor.mode === "create"
+                    ? t(locale, "employees.newTitle")
+                    : t(locale, "employees.editTitle")}
+                </h2>
+                <p className="modalSubtitle">
+                  {editor.mode === "create"
+                    ? t(locale, "employees.newSubtitle")
+                    : t(locale, "employees.editSubtitle")}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="iconButton"
+                onClick={() => setEditor(null)}
+                aria-label={t(locale, "common.cancel")}
+              >
+                <CloseIcon size={16} />
+              </button>
+            </div>
 
             {errorCode ? (
               <div className="alert alertError">{t(locale, `errors.${errorCode}`)}</div>
@@ -365,16 +445,21 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
               <input
                 className="fieldInput"
                 type="email"
+                placeholder="name@company.com"
                 value={editor.email}
                 disabled={editor.mode === "edit" && editor.employee.emailVerification === "VERIFIED"}
                 onChange={(event) =>
-                  setEditor((current) => (current ? { ...current, email: event.target.value } : current))
+                  setEditor((current) =>
+                    current ? { ...current, email: event.target.value } : current
+                  )
                 }
                 required
               />
-              {editor.mode === "edit" && editor.employee.emailVerification === "VERIFIED" ? (
-                <span className="modalHint">{t(locale, "employees.hintEmailLocked")}</span>
-              ) : null}
+              <span className="fieldHint">
+                {editor.mode === "edit" && editor.employee.emailVerification === "VERIFIED"
+                  ? t(locale, "employees.hintEmailVerified")
+                  : t(locale, "employees.hintActivation")}
+              </span>
             </label>
 
             <label className="field">
@@ -388,7 +473,9 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
                     current ? { ...current, role: event.target.value as EmployeeRole } : current
                   )
                 }
+                required
               >
+                <option value="">{t(locale, "employees.rolePlaceholder")}</option>
                 {EMPLOYEE_ROLES.map((role) => (
                   <option key={role} value={role}>
                     {t(locale, `roles.${role}`)}
@@ -397,27 +484,41 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
               </select>
             </label>
 
-            <label className="field">
+            <div className="field">
               <span className="fieldLabel">{t(locale, "employees.fields.status")}</span>
-              <select
-                className="fieldSelect"
-                value={editor.accountStatus}
-                disabled={editor.mode === "edit" && editor.employee.isBootstrapAdmin}
-                onChange={(event) =>
-                  setEditor((current) =>
-                    current
-                      ? { ...current, accountStatus: event.target.value as AccountStatus }
-                      : current
-                  )
-                }
-              >
-                <option value="ACTIVE">{t(locale, "status.Active")}</option>
-                <option value="INACTIVE">{t(locale, "status.Inactive")}</option>
-              </select>
+              <div className="segmented" role="radiogroup" aria-label={t(locale, "employees.fields.status")}>
+                {(["ACTIVE", "INACTIVE"] as AccountStatus[]).map((option) => {
+                  const selected = editor.accountStatus === option;
+                  const locked = editor.mode === "edit" && editor.employee.isBootstrapAdmin;
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      disabled={locked}
+                      className={selected ? "segment segmentSelected" : "segment"}
+                      onClick={() =>
+                        setEditor((current) =>
+                          current ? { ...current, accountStatus: option } : current
+                        )
+                      }
+                    >
+                      <span
+                        className={
+                          option === "ACTIVE" ? "segmentDot segmentDotActive" : "segmentDot segmentDotInactive"
+                        }
+                        aria-hidden="true"
+                      />
+                      {t(locale, `status.${option === "ACTIVE" ? "Active" : "Inactive"}`)}
+                    </button>
+                  );
+                })}
+              </div>
               {editor.mode === "edit" && editor.employee.isBootstrapAdmin ? (
-                <span className="modalHint">{t(locale, "employees.bootstrapLocked")}</span>
+                <span className="fieldHint">{t(locale, "employees.bootstrapLocked")}</span>
               ) : null}
-            </label>
+            </div>
 
             <div className="modalFooter">
               <button type="button" className="button buttonGhost" onClick={() => setEditor(null)}>
@@ -427,10 +528,10 @@ export function EmployeeAccountClient({ locale }: { locale: Locale }) {
                 {editor.mode === "create"
                   ? submitting
                     ? t(locale, "common.creating")
-                    : t(locale, "common.create")
+                    : t(locale, "employees.createAction")
                   : submitting
                     ? t(locale, "common.saving")
-                    : t(locale, "common.save")}
+                    : t(locale, "employees.saveAction")}
               </button>
             </div>
           </form>

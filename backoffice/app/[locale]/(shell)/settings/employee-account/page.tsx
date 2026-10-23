@@ -1,3 +1,4 @@
+import { SettingsSubNav } from "@/components/SettingsSubNav";
 import { currentAdminEmployee } from "@/lib/currentSession";
 import { DEFAULT_LOCALE, isLocale } from "@/lib/i18n/config";
 import { t } from "@/lib/i18n/messages";
@@ -13,17 +14,17 @@ export default async function EmployeeAccountPage({
   const admin = await currentAdminEmployee();
   if (!admin) {
     return (
-      <section className="card">
+      <section className="card cardGrow">
         <h1 className="cardTitle">{t(safeLocale, "forbidden.title")}</h1>
         <p className="cardBody">{t(safeLocale, "forbidden.description")}</p>
-        <p>
-          <a className="button buttonGhost" href={`/${safeLocale}/course`}>
-            {t(safeLocale, "forbidden.backToCourse")}
-          </a>
-        </p>
       </section>
     );
   }
 
-  return <EmployeeAccountClient locale={safeLocale} />;
+  return (
+    <>
+      <SettingsSubNav role={admin.role} />
+      <EmployeeAccountClient locale={safeLocale} />
+    </>
+  );
 }

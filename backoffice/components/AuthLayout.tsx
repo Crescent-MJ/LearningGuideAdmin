@@ -1,12 +1,12 @@
 "use client";
 
 import { LocaleSwitch } from "@/components/LocaleSwitch";
+import { BrandMark, ShieldIcon } from "@/components/icons";
 import { getMessages, t } from "@/lib/i18n/messages";
 import { useLocale } from "@/lib/i18n/useLocale";
 
 /**
- * 认证页外壳，视觉与 Portal Sign In 对齐：
- * 深色背景图 + 顶部品牌条 + 居中白卡 + 返回链接 + 法律声明。
+ * 认证页外壳，按设计稿：白色品牌条 + 深色背景图 + 居中徽标/标题/副标题 + 白卡。
  */
 export function AuthLayout({
   title,
@@ -28,28 +28,27 @@ export function AuthLayout({
 
   return (
     <div className="authPage">
-      <div className="authTopBar">
-        <span className="authMark">
-          <span className="brandMark" aria-hidden="true">
-            LG
-          </span>
+      <div className="authPageHeader">
+        <span className="authBrand">
+          <BrandMark size={24} />
           {messages.app.name}
         </span>
-        <div className="authTopRight">
-          <LocaleSwitch persist={false} className="localeChip localeChipOnDark" />
-        </div>
+        <LocaleSwitch persist={false} />
       </div>
 
-      <main className="authStage">
-        <div className="authHeading">
-          <h1 className="authTitle">{title}</h1>
-          {subtitle ? <p className="authSubtitle">{subtitle}</p> : null}
-        </div>
+      <main className="authBody">
+        <span className="authBadge">
+          <ShieldIcon size={14} />
+          {messages.app.name}
+        </span>
+
+        <h1 className="authTitle">{title}</h1>
+        {subtitle ? <p className="authSubtitle">{subtitle}</p> : null}
 
         <div className="authCard">{children}</div>
 
         {backHref && backLabel ? (
-          <a className="authBack" href={backHref}>
+          <a className="authFooterLink" href={backHref}>
             {backLabel}
           </a>
         ) : null}
