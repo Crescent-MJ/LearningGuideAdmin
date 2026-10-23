@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import type { ErrorCode } from "@/contracts/envelope";
+import { AuthLayout } from "@/components/AuthLayout";
 import { t } from "@/lib/i18n/messages";
 import { useLocale } from "@/lib/i18n/useLocale";
 import { useQueryToken } from "@/lib/useQueryToken";
@@ -52,6 +53,9 @@ export default function ResetPasswordPage() {
     }
   }
 
+  const signInHref = `/${locale}/sign-in`;
+  const signInLabel = t(locale, "activate.goSignIn");
+
   const terminal =
     errorCode !== null && TERMINAL_CODES.includes(errorCode)
       ? errorCode
@@ -63,14 +67,9 @@ export default function ResetPasswordPage() {
 
   if (terminal === "LOADING") {
     return (
-      <div className="authPage">
-        <aside className="authBrand">
-          <span className="authBrandName">{t(locale, "app.name")}</span>
-        </aside>
-        <div className="authPanel">
-          <p className="authSubtitle">{t(locale, "common.loading")}</p>
-        </div>
-      </div>
+      <AuthLayout title={t(locale, "reset.title")} subtitle={t(locale, "common.loading")}>
+        <p className="modalHint">{t(locale, "common.loading")}</p>
+      </AuthLayout>
     );
   }
 
@@ -89,56 +88,47 @@ export default function ResetPasswordPage() {
           : "reset.invalidBody";
 
     return (
-      <div className="authPage">
-        <aside className="authBrand">
-          <span className="authBrandName">{t(locale, "app.name")}</span>
-        </aside>
-        <div className="authPanel">
-          <h1 className="authTitle">{t(locale, titleKey)}</h1>
-          <p className="authSubtitle">{t(locale, bodyKey)}</p>
-          <a className="button" href={`/${locale}/sign-in`}>
-            {t(locale, "activate.goSignIn")}
-          </a>
-        </div>
-      </div>
+      <AuthLayout
+        title={t(locale, titleKey)}
+        subtitle={t(locale, bodyKey)}
+        backHref={signInHref}
+        backLabel={signInLabel}
+      >
+        <a className="button" href={signInHref} style={{ width: "100%" }}>
+          {signInLabel}
+        </a>
+      </AuthLayout>
     );
   }
 
   if (done) {
     return (
-      <div className="authPage">
-        <aside className="authBrand">
-          <span className="authBrandName">{t(locale, "app.name")}</span>
-        </aside>
-        <div className="authPanel">
-          <h1 className="authTitle">{t(locale, "reset.successTitle")}</h1>
-          <p className="authSubtitle">{t(locale, "reset.successBody")}</p>
-          <a className="button" href={`/${locale}/sign-in`}>
-            {t(locale, "activate.goSignIn")}
-          </a>
-        </div>
-      </div>
+      <AuthLayout
+        title={t(locale, "reset.successTitle")}
+        subtitle={t(locale, "reset.successBody")}
+        backHref={signInHref}
+        backLabel={signInLabel}
+      >
+        <a className="button" href={signInHref} style={{ width: "100%" }}>
+          {signInLabel}
+        </a>
+      </AuthLayout>
     );
   }
 
   return (
-    <div className="authPage">
-      <aside className="authBrand">
-        <span className="authBrandName">{t(locale, "app.name")}</span>
-        <p className="authBrandCopy">{t(locale, "reset.subtitle")}</p>
-      </aside>
-
-      <form className="authPanel" onSubmit={handleSubmit} noValidate>
-        <div>
-          <h1 className="authTitle">{t(locale, "reset.title")}</h1>
-          <p className="authSubtitle">{t(locale, "reset.subtitle")}</p>
-        </div>
-
+    <AuthLayout
+      title={t(locale, "reset.title")}
+      subtitle={t(locale, "reset.subtitle")}
+      backHref={signInHref}
+      backLabel={signInLabel}
+    >
+      <form onSubmit={handleSubmit} noValidate>
         {errorCode ? (
           <div className="alert alertError">{t(locale, `errors.${errorCode}`)}</div>
         ) : null}
 
-        <label className="field">
+        <div className="field" style={{ marginBottom: 14 }}>
           <span className="fieldLabel">{t(locale, "reset.passwordLabel")}</span>
           <input
             className="fieldInput"
@@ -148,9 +138,9 @@ export default function ResetPasswordPage() {
             onChange={(event) => setPassword(event.target.value)}
             required
           />
-        </label>
+        </div>
 
-        <label className="field">
+        <div className="field" style={{ marginBottom: 14 }}>
           <span className="fieldLabel">{t(locale, "reset.confirmLabel")}</span>
           <input
             className="fieldInput"
@@ -160,12 +150,12 @@ export default function ResetPasswordPage() {
             onChange={(event) => setConfirmPassword(event.target.value)}
             required
           />
-        </label>
+        </div>
 
-        <button className="button" type="submit" disabled={submitting}>
+        <button className="button" type="submit" disabled={submitting} style={{ width: "100%" }}>
           {submitting ? t(locale, "reset.submitting") : t(locale, "reset.submit")}
         </button>
       </form>
-    </div>
+    </AuthLayout>
   );
 }

@@ -1,16 +1,37 @@
+/*
+ * 视觉基准：与 https://www.ilovelearningguide.com 的 Portal 保持一致。
+ * 颜色 / 圆角 / 字体取自该站生产 CSS 的设计变量。
+ */
 :root {
-  --bg: #f5f6f8;
-  --surface: #ffffff;
-  --border: #e2e5ea;
-  --text: #1d2129;
-  --muted: #626a78;
-  --brand: #1f5eff;
-  --brand-soft: #eaf0ff;
-  --danger: #d92d20;
-  --success: #12805c;
-  --warning: #b25e09;
-  --sidebar: #0f172a;
-  --sidebar-text: #c8d0e0;
+  --color-primary: #0b63f6;
+  --color-primary-hover: #0757d8;
+  --color-primary-soft: #eaf2ff;
+  --color-text-main: #0b1437;
+  --color-text-muted: #5d6880;
+  --color-border: #d9e2f1;
+  --color-page-bg: #f8fafe;
+  --color-surface: #ffffff;
+  --color-sidebar: #eef1f6;
+  --color-success: #127a4b;
+  --color-warning: #b54708;
+  --color-danger: #d92d20;
+  --color-line-soft: #dce5ee;
+
+  /* 组件层沿用的别名，避免各处重复改 */
+  --bg: var(--color-page-bg);
+  --surface: var(--color-surface);
+  --border: var(--color-border);
+  --text: var(--color-text-main);
+  --muted: var(--color-text-muted);
+  --brand: var(--color-primary);
+  --brand-soft: var(--color-primary-soft);
+  --success: var(--color-success);
+  --warning: var(--color-warning);
+  --danger: var(--color-danger);
+  --sidebar: var(--color-sidebar);
+  --sidebar-text: #344054;
+  --radius-card: 12px;
+  --radius-control: 8px;
 }
 
 * {
@@ -21,20 +42,22 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background: var(--bg);
-  color: var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "PingFang SC",
-    "Microsoft YaHei", sans-serif;
+  background: var(--color-page-bg);
+  color: var(--color-text-main);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 14px;
   line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
 }
 
 a {
-  color: var(--brand);
+  color: var(--color-primary);
   text-decoration: none;
 }
 
 a:hover {
+  color: var(--color-primary-hover);
   text-decoration: underline;
 }
 
@@ -42,54 +65,154 @@ button {
   font: inherit;
 }
 
-/* ---------- Auth pages ---------- */
+/* ---------- 认证页（与 Portal Sign In 一致：深色图片背景 + 居中白卡） ---------- */
 .authPage {
   min-height: 100vh;
-  display: grid;
-  grid-template-columns: 1fr 480px;
+  padding: 0;
+  background: linear-gradient(rgba(10, 17, 28, 0.62), rgba(10, 17, 28, 0.62)),
+    url("/portal/auth-library.jpg") 50% / cover fixed;
 }
 
-.authBrand {
-  background: linear-gradient(150deg, #0f172a 0%, #1f3a8a 60%, #1f5eff 100%);
-  color: #fff;
-  padding: 56px;
+.authTopBar {
+  max-width: 1280px;
+  margin: 0 auto;
+  min-height: 70px;
+  padding: 0 20px;
   display: flex;
-  flex-direction: column;
+  align-items: center;
   justify-content: space-between;
+  gap: 16px;
 }
 
-.authBrandName {
-  font-size: 22px;
-  font-weight: 650;
-}
-
-.authBrandCopy {
-  max-width: 460px;
-  font-size: 15px;
-  opacity: 0.85;
-}
-
-.authPanel {
-  background: var(--surface);
-  padding: 56px 48px;
+.authTopRight {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 18px;
+  align-items: center;
+  gap: 14px;
+}
+
+.authStage {
+  min-height: calc(100vh - 70px);
+  display: grid;
+  place-items: center;
+  padding: 50px 20px 72px;
+  align-content: start;
+}
+
+.authHeading {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  color: #fff;
+  text-align: center;
+}
+
+.authMark {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: 0.2px;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .authTitle {
   margin: 0;
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 650;
+  color: #fff;
 }
 
 .authSubtitle {
   margin: 0;
-  color: var(--muted);
   font-size: 13px;
+  color: rgba(255, 255, 255, 0.82);
+  max-width: 420px;
 }
 
+.authCard {
+  width: min(448px, 100%);
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
+  padding: 28px;
+  box-shadow: 0 18px 48px rgba(10, 17, 28, 0.24);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.authBack {
+  display: block;
+  margin-top: 16px;
+  color: #fff !important;
+  font-size: 13px;
+  text-align: center;
+  text-decoration: none;
+}
+
+.authBack:hover {
+  text-decoration: underline;
+  color: #fff !important;
+}
+
+.authLegal {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.78);
+  text-align: center;
+  max-width: 448px;
+}
+
+.authLegal a {
+  color: #fff;
+  text-decoration: underline;
+}
+
+.authDivider {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-line-soft);
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ---------- 语言胶囊（对应 Portal 的「中 / EN」） ---------- */
+.localeChip {
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 5px;
+  background: #eaecf0;
+  color: #475467;
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.localeChip:hover {
+  background: #dfe3e9;
+  color: #344054;
+  text-decoration: none;
+}
+
+.localeChipOnDark {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+}
+
+.localeChipOnDark:hover {
+  background: rgba(255, 255, 255, 0.26);
+  color: #fff;
+}
+
+/* ---------- 表单控件 ---------- */
 .field {
   display: flex;
   flex-direction: column;
@@ -99,29 +222,31 @@ button {
 .fieldLabel {
   font-size: 13px;
   font-weight: 550;
+  color: var(--color-text-main);
 }
 
 .fieldInput,
 .fieldSelect {
   width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
   background: #fff;
-  color: var(--text);
+  color: var(--color-text-main);
   outline: none;
   font: inherit;
 }
 
 .fieldInput:focus,
 .fieldSelect:focus {
-  border-color: var(--brand);
-  box-shadow: 0 0 0 3px var(--brand-soft);
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
 }
 
 .fieldInput:disabled,
 .fieldSelect:disabled {
-  background: #f2f4f7;
+  background: #f2f4f8;
   color: var(--muted);
 }
 
@@ -140,11 +265,11 @@ button {
 }
 
 .hintOk {
-  color: var(--success);
+  color: var(--color-success);
 }
 
 .hintBad {
-  color: var(--danger);
+  color: var(--color-danger);
 }
 
 .hintMuted {
@@ -152,13 +277,22 @@ button {
 }
 
 .button {
-  border: none;
-  border-radius: 8px;
-  padding: 11px 16px;
-  background: var(--brand);
+  height: 44px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  padding: 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  background: var(--color-primary);
   color: #fff;
-  font-weight: 600;
+  font-weight: 650;
   cursor: pointer;
+}
+
+.button:hover {
+  background: var(--color-primary-hover);
 }
 
 .button:disabled {
@@ -167,35 +301,42 @@ button {
 }
 
 .buttonGhost {
-  background: transparent;
-  color: var(--brand);
-  border: 1px solid var(--border);
+  background: #fff;
+  color: #1b2b4c;
+  border: 1px solid var(--color-border);
+}
+
+.buttonGhost:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
 }
 
 .buttonDanger {
-  background: transparent;
-  color: var(--danger);
+  background: #fff;
+  color: var(--color-danger);
   border: 1px solid #fecdca;
 }
 
 .buttonSmall {
-  padding: 6px 10px;
+  height: 34px;
+  padding: 0 12px;
   font-size: 12.5px;
   border-radius: 6px;
+  font-weight: 600;
 }
 
 .linkButton {
   background: none;
   border: none;
   padding: 0;
-  color: var(--brand);
+  color: var(--color-primary);
   cursor: pointer;
   font-size: 13px;
   text-align: left;
 }
 
 .alert {
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   padding: 10px 12px;
   font-size: 13px;
   border: 1px solid;
@@ -204,28 +345,21 @@ button {
 .alertError {
   background: #fef3f2;
   border-color: #fecdca;
-  color: var(--danger);
+  color: var(--color-danger);
 }
 
 .alertOk {
   background: #ecfdf3;
   border-color: #abefc6;
-  color: var(--success);
+  color: var(--color-success);
 }
 
-.localeSwitch {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-/* ---------- Shell ---------- */
+/* ---------- 应用外壳 ---------- */
 .shell {
   min-height: 100vh;
   display: grid;
   grid-template-columns: 240px 1fr;
+  background: var(--color-page-bg);
 }
 
 .shellCollapsed {
@@ -233,32 +367,46 @@ button {
 }
 
 .sidebar {
-  background: var(--sidebar);
+  background: var(--color-sidebar);
+  border-right: 1px solid var(--color-border);
   color: var(--sidebar-text);
-  padding: 18px 12px;
+  padding: 16px 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
 .sidebarBrand {
-  color: #fff;
+  color: var(--color-text-main);
   font-weight: 650;
   font-size: 13px;
-  padding: 4px 10px 14px;
+  padding: 4px 8px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 
-.sidebarToggle {
-  background: rgba(255, 255, 255, 0.08);
+.brandMark {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--color-primary);
   color: #fff;
-  border: none;
+  display: inline-grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
+.sidebarToggle {
+  background: #fff;
+  color: #435270;
+  border: 1px solid var(--color-border);
   border-radius: 6px;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   cursor: pointer;
   line-height: 1;
 }
@@ -269,26 +417,33 @@ button {
   gap: 10px;
   padding: 9px 10px;
   border-radius: 8px;
-  color: var(--sidebar-text);
+  color: #344054;
   font-size: 13.5px;
+  text-decoration: none;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
 }
 
 .navItem:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: #fff;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
   text-decoration: none;
 }
 
 .navItemActive {
-  background: var(--brand);
-  color: #fff;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: 600;
 }
 
 .navIcon {
   width: 20px;
   text-align: center;
   font-size: 12px;
-  opacity: 0.9;
+  opacity: 0.85;
 }
 
 .main {
@@ -298,61 +453,53 @@ button {
 }
 
 .header {
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-line-soft);
   padding: 0 24px;
-  height: 56px;
+  min-height: 70px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
 }
 
-.headerTitle {
-  font-weight: 600;
-  font-size: 14px;
+.headerBrand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 650;
+  color: var(--color-text-main);
+  font-size: 14.5px;
+}
+
+.headerBrandSub {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 13px;
+  padding-left: 10px;
+  border-left: 1px solid var(--color-border);
 }
 
 .headerRight {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
   font-size: 13px;
   color: var(--muted);
 }
 
 .employeeName {
-  color: var(--text);
+  color: var(--color-text-main);
   font-weight: 550;
 }
 
 .roleTag {
-  background: var(--brand-soft);
-  color: var(--brand);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
   border-radius: 999px;
   padding: 2px 10px;
   font-size: 12px;
   font-weight: 550;
-}
-
-.localeBadge {
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 4px 12px;
-  font-size: 12px;
-  color: var(--muted);
-  background: transparent;
-  cursor: pointer;
-}
-
-.localeBadge:hover {
-  border-color: var(--brand);
-  color: var(--brand);
-}
-
-.localeBadge:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 .content {
@@ -360,9 +507,9 @@ button {
 }
 
 .card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
   padding: 24px;
 }
 
@@ -370,6 +517,7 @@ button {
   margin: 0 0 8px;
   font-size: 18px;
   font-weight: 650;
+  color: var(--color-text-main);
 }
 
 .cardBody {
@@ -379,7 +527,7 @@ button {
   max-width: 760px;
 }
 
-/* ---------- Table ---------- */
+/* ---------- 表格 ---------- */
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -402,7 +550,7 @@ button {
 .table td {
   text-align: left;
   padding: 11px 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--color-border);
   vertical-align: middle;
 }
 
@@ -410,7 +558,7 @@ button {
   color: var(--muted);
   font-weight: 550;
   font-size: 12.5px;
-  background: #fafbfc;
+  background: var(--color-page-bg);
 }
 
 .table tr:last-child td {
@@ -433,11 +581,11 @@ button {
 }
 
 .dotActive {
-  background: var(--success);
+  background: var(--color-success);
 }
 
 .dotPending {
-  background: var(--warning);
+  background: var(--color-warning);
 }
 
 .dotInactive {
@@ -460,11 +608,11 @@ button {
   flex-wrap: wrap;
 }
 
-/* ---------- Modal ---------- */
+/* ---------- 弹窗 ---------- */
 .modalBackdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.45);
+  background: rgba(10, 17, 28, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -473,8 +621,8 @@ button {
 }
 
 .modal {
-  background: var(--surface);
-  border-radius: 14px;
+  background: var(--color-surface);
+  border-radius: var(--radius-card);
   width: min(520px, 100%);
   max-height: calc(100vh - 48px);
   overflow: auto;
@@ -482,7 +630,7 @@ button {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.24);
+  box-shadow: 0 24px 64px rgba(10, 17, 28, 0.24);
 }
 
 .modalTitle {
@@ -503,16 +651,8 @@ button {
 }
 
 @media (max-width: 900px) {
-  .authPage {
-    grid-template-columns: 1fr;
-  }
-
-  .authBrand {
-    display: none;
-  }
-
-  .authPanel {
-    padding: 40px 24px;
+  .authStage {
+    padding: 28px 16px 50px;
   }
 
   .shell,

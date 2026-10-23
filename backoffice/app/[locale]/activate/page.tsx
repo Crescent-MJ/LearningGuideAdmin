@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import type { ErrorCode } from "@/contracts/envelope";
+import { AuthLayout } from "@/components/AuthLayout";
 import { t } from "@/lib/i18n/messages";
 import { useLocale } from "@/lib/i18n/useLocale";
 import { useQueryToken } from "@/lib/useQueryToken";
@@ -13,17 +14,6 @@ const TERMINAL_CODES: readonly ErrorCode[] = [
   "TOKEN_ALREADY_USED",
   "INVALID_TOKEN",
 ];
-
-function shell(children: React.ReactNode) {
-  return (
-    <div className="authPage">
-      <aside className="authBrand">
-        <span className="authBrandName">Learning Guide BackOffice</span>
-      </aside>
-      <div className="authPanel">{children}</div>
-    </div>
-  );
-}
 
 export default function ActivatePage() {
   const locale = useLocale();
@@ -64,69 +54,76 @@ export default function ActivatePage() {
     }
   }
 
+  const signInHref = `/${locale}/sign-in`;
+  const signInLabel = t(locale, "activate.goSignIn");
+
   if (!ready) {
-    return shell(<p className="authSubtitle">{t(locale, "common.loading")}</p>);
+    return (
+      <AuthLayout title={t(locale, "activate.title")} subtitle={t(locale, "common.loading")}>
+        <p className="modalHint">{t(locale, "common.loading")}</p>
+      </AuthLayout>
+    );
   }
 
   if (!token) {
-    return shell(
-      <>
-        <h1 className="authTitle">{t(locale, "activate.invalidTitle")}</h1>
-        <p className="authSubtitle">{t(locale, "activate.missingToken")}</p>
-        <a className="button" href={`/${locale}/sign-in`}>
-          {t(locale, "activate.goSignIn")}
+    return (
+      <AuthLayout
+        title={t(locale, "activate.invalidTitle")}
+        subtitle={t(locale, "activate.missingToken")}
+        backHref={signInHref}
+        backLabel={signInLabel}
+      >
+        <a className="button" href={signInHref} style={{ width: "100%" }}>
+          {signInLabel}
         </a>
-      </>
+      </AuthLayout>
     );
   }
 
   if (errorCode && TERMINAL_CODES.includes(errorCode)) {
     const expired = errorCode === "TOKEN_EXPIRED";
-    return shell(
-      <>
-        <h1 className="authTitle">
-          {t(locale, expired ? "activate.expiredTitle" : "activate.invalidTitle")}
-        </h1>
-        <p className="authSubtitle">
-          {t(locale, expired ? "activate.expiredBody" : "activate.invalidBody")}
-        </p>
-        <a className="button" href={`/${locale}/sign-in`}>
-          {t(locale, "activate.goSignIn")}
+    return (
+      <AuthLayout
+        title={t(locale, expired ? "activate.expiredTitle" : "activate.invalidTitle")}
+        subtitle={t(locale, expired ? "activate.expiredBody" : "activate.invalidBody")}
+        backHref={signInHref}
+        backLabel={signInLabel}
+      >
+        <a className="button" href={signInHref} style={{ width: "100%" }}>
+          {signInLabel}
         </a>
-      </>
+      </AuthLayout>
     );
   }
 
   if (done) {
-    return shell(
-      <>
-        <h1 className="authTitle">{t(locale, "activate.successTitle")}</h1>
-        <p className="authSubtitle">{t(locale, "activate.successBody")}</p>
-        <a className="button" href={`/${locale}/sign-in`}>
-          {t(locale, "activate.goSignIn")}
+    return (
+      <AuthLayout
+        title={t(locale, "activate.successTitle")}
+        subtitle={t(locale, "activate.successBody")}
+        backHref={signInHref}
+        backLabel={signInLabel}
+      >
+        <a className="button" href={signInHref} style={{ width: "100%" }}>
+          {signInLabel}
         </a>
-      </>
+      </AuthLayout>
     );
   }
 
   return (
-    <div className="authPage">
-      <aside className="authBrand">
-        <span className="authBrandName">{t(locale, "app.name")}</span>
-        <p className="authBrandCopy">{t(locale, "activate.subtitle")}</p>
-      </aside>
-
-      <form className="authPanel" onSubmit={handleSubmit} noValidate>
-        <div>
-          <h1 className="authTitle">{t(locale, "activate.title")}</h1>
-          <p className="authSubtitle">{t(locale, "activate.subtitle")}</p>
-        </div>
-
+    <AuthLayout
+      title={t(locale, "activate.title")}
+      subtitle={t(locale, "activate.subtitle")}
+      backHref={signInHref}
+      backLabel={signInLabel}
+    >
+      <form onSubmit={handleSubmit} noValidate>
         {errorCode ? (
           <div className="alert alertError">{t(locale, `errors.${errorCode}`)}</div>
         ) : null}
 
-        <label className="field">
+        <div className="field" style={{ marginBottom: 14 }}>
           <span className="fieldLabel">{t(locale, "activate.passwordLabel")}</span>
           <input
             className="fieldInput"
@@ -136,9 +133,9 @@ export default function ActivatePage() {
             onChange={(event) => setPassword(event.target.value)}
             required
           />
-        </label>
+        </div>
 
-        <label className="field">
+        <div className="field" style={{ marginBottom: 14 }}>
           <span className="fieldLabel">{t(locale, "activate.confirmLabel")}</span>
           <input
             className="fieldInput"
@@ -148,12 +145,12 @@ export default function ActivatePage() {
             onChange={(event) => setConfirmPassword(event.target.value)}
             required
           />
-        </label>
+        </div>
 
-        <button className="button" type="submit" disabled={submitting}>
+        <button className="button" type="submit" disabled={submitting} style={{ width: "100%" }}>
           {submitting ? t(locale, "activate.submitting") : t(locale, "activate.submit")}
         </button>
       </form>
-    </div>
+    </AuthLayout>
   );
 }

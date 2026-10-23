@@ -753,3 +753,24 @@
 - **仍未覆盖**：`client/`、`server/` 零改动；无 CSRF 令牌；限流仍为单实例内存；
   邮件仍为 console adapter；顶部栏缺 logo；迁移脚本无回滚（只做前向）
 
+
+---
+
+## 2026-10-23 ~ 视觉对齐学员门户（ilovelearningguide.com/zh-CN/portal）
+
+- **用户要求**：页面风格与共享功能（中英文切换、登录等）需与
+  `https://www.ilovelearningguide.com/zh-CN/portal` 保持一致
+- **取基准方式**：抓取该站生产 CSS，直接采用其设计变量（未凭感觉配色）
+  - `--color-primary:#0b63f6`、`--color-primary-hover:#0757d8`、`--color-primary-soft:#eaf2ff`
+  - `--color-text-main:#0b1437`、`--color-text-muted:#5d6880`、`--color-border:#d9e2f1`、`--color-page-bg:#f8fafe`
+  - 字体 `Inter, ui-sans-serif, system-ui…`；控件圆角 8px / 卡片 12px
+- **共享组件对齐**：
+  - 语言切换：改为胶囊显示当前语言短名（`EN` / `中`），点击切另一种（与其行为一致）
+  - 登录页：深色背景图 + 居中白卡（`min(448px,100%)`）+ 邮箱优先两步 + 返回门户链接 + 法律声明
+  - 认证背景图 `/portal/auth-library.jpg` 已复制到 `backoffice/public/portal/`
+  - 应用外壳改为浅色主题（侧栏 `#eef1f6`），顶部栏补品牌位（PORT-NAV-001 logo 顺带落地）
+- **有意差异**：不复制「创建账号 / Google / 微信登录 / 开始学习」，BackOffice 仅员工账号
+- **自测**：`tsc` 0 error、`eslint` 0 warning、单元测试 44/44、`next build` 成功；
+  HTTP 实测 `/en-GB/sign-in` 与 `/zh-CN/sign-in` 均 200，语言胶囊分别渲染 `EN` / `中`，
+  背景图 `/portal/auth-library.jpg` 200（1,083,702 bytes）
+

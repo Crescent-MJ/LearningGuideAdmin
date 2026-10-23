@@ -80,16 +80,51 @@ Route Handler → contracts 校验 → 会话/权限 → modules/*/services → 
 - 审计事件表带 CHECK 约束，禁止写入形如 `password=`/`token=` 的明文
 - 忘记密码对外始终返回同一结果，避免账号枚举
 
+## 5. 视觉基准
+
+页面风格与共享功能（语言切换、登录表单）以
+`https://www.ilovelearningguide.com/zh-CN/portal` 为基准，生产 CSS 中的设计变量已直接采用：
+
+| Token | 取值 | 用途 |
+|---|---|---|
+| `--color-primary` | `#0b63f6` | 主按钮、链接、导航激活 |
+| `--color-primary-hover` | `#0757d8` | 悬停态 |
+| `--color-primary-soft` | `#eaf2ff` | 激活项底色、焦点环 |
+| `--color-text-main` | `#0b1437` | 正文 |
+| `--color-text-muted` | `#5d6880` | 辅助文字 |
+| `--color-border` | `#d9e2f1` | 描边 |
+| `--color-page-bg` | `#f8fafe` | 页面底色 |
+| `--color-sidebar` | `#eef1f6` | 侧边栏 |
+| 字体 | `Inter, ui-sans-serif, system-ui, …` + 中文回退 | 全站 |
+| 圆角 | 控件 8px / 卡片 12px / 胶囊 999px | 全站 |
+
+共享组件的对齐点：
+
+| 组件 | 基准站行为 | 本实现 |
+|---|---|---|
+| 语言切换 | 胶囊显示当前语言短名（`EN` / `中`），点击切到另一种 | `components/LocaleSwitch.tsx`，同一交互 |
+| 登录页 | 深色背景图 + 居中白卡 + 邮箱优先两步 | `components/AuthLayout.tsx` + `[locale]/sign-in` |
+| 认证页背景 | `/portal/auth-library.jpg` | 已复制到 `backoffice/public/portal/auth-library.jpg` |
+| 返回链接 / 法律声明 | 「返回 Learning Guide Portal」+ 条款链接 | `AuthLayout` 的 `backHref` / `showLegal` |
+| 顶部栏 | 品牌 + 语言胶囊 + 账号操作 | `AppShell` 的 `.header`（PORT-NAV-001 logo 顺带落地） |
+
+有意保留的差异（因产品定位不同）：
+
+- 基准站是学员门户，有「登录或创建账号」「Google / 微信登录」「开始学习」CTA；
+  BackOffice 仅员工账号，**不提供自助注册与社交登录**，因此副标题明确写「不支持自助注册」。
+- 基准站导航在顶部；BackOffice 按 PRD 使用左侧导航，只复用其配色与控件样式。
+- logo 暂用 `LG` 文字块占位，设计侧提供 SVG 后替换。
+
 ## 6. 已知限制（须在验收时确认）
 
 | 限制 | 影响 | 处置建议 |
 |---|---|---|
 | 限流为单实例内存实现 | 多实例部署时限流失效 | 上线前换共享存储（Redis/DB） |
 | 邮件投递只有 console adapter | 生产态返回 `NOT_CONFIGURED`，不会伪装成功 | 接入 SES/SMTP 后再验收邮件链路 |
-| PRD §8 原型图以 .docx 内嵌图片存在，仓库内 `md_assets/` 缺失 | 无法逐像素对齐原型 | 由用户提供 Figma/截图或补齐 `md_assets/` |
+| PRD §8 原型图以 .docx 内嵌图片存在，仓库内 `md_assets/` 缺失 | 无法逐像素对齐后台原型 | 由用户提供 Figma/截图或补齐 `md_assets/` |
 | Figma MCP 在本机未注入 agent 工具 | 无法读取设计上下文 | 见 `docs/AI_Collaboration_Log.md` 记录 |
-| 页面样式为按 PRD 描述自建，非设计稿还原 | 视觉细节需人工调整 | 设计稿到位后重做样式层 |
-| 顶部栏未放 logo（PRD PORT-NAV-001 要求） | 与原型不一致 | 需设计侧提供 logo 资产 |
+| 视觉以学员门户为基准，非后台原型稿 | 若后台有专属设计稿仍需再对齐 | 拿到后台设计稿后复核 |
+| logo 用 `LG` 文字块占位 | 与真实品牌标识不同 | 设计侧提供 SVG 后替换 |
 | Actions 列为并列按钮，非 per-row 菜单（PORT-LST-005） | 交互形态差异 | 由视觉确认后再改 |
 | Last Login 按 UTC 显示 | 非本地时区格式 | 需要时按 locale 格式化 |
 | 无 CSRF token（依赖 SameSite=Lax） | 跨站表单受 Cookie 策略保护 | 如需强防护再加双提交令牌 |

@@ -102,8 +102,15 @@ export function AppShell({
 
       <div className="main">
         <header className="header">
-          <span className="headerTitle">
-            {activeMenu ? t(locale, MENU_LABEL[activeMenu]) : t(locale, "app.subtitle")}
+          {/* PORT-NAV-001：共享顶部栏展示 logo 与产品名 */}
+          <span className="headerBrand">
+            <span className="brandMark" aria-hidden="true">
+              LG
+            </span>
+            {t(locale, "app.name")}
+            <span className="headerBrandSub">
+              {activeMenu ? t(locale, MENU_LABEL[activeMenu]) : t(locale, "app.subtitle")}
+            </span>
           </span>
 
           <div className="headerRight">

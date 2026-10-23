@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import type { ErrorCode } from "@/contracts/envelope";
+import { AuthLayout } from "@/components/AuthLayout";
 import { t } from "@/lib/i18n/messages";
 import { useLocale } from "@/lib/i18n/useLocale";
 
@@ -37,24 +38,19 @@ export default function ForgotPasswordPage() {
   }
 
   return (
-    <div className="authPage">
-      <aside className="authBrand">
-        <span className="authBrandName">{t(locale, "app.name")}</span>
-        <p className="authBrandCopy">{t(locale, "forgot.subtitle")}</p>
-      </aside>
-
-      <form className="authPanel" onSubmit={handleSubmit} noValidate>
-        <div>
-          <h1 className="authTitle">{t(locale, "forgot.title")}</h1>
-          <p className="authSubtitle">{t(locale, "forgot.subtitle")}</p>
-        </div>
-
+    <AuthLayout
+      title={t(locale, "forgot.title")}
+      subtitle={t(locale, "forgot.subtitle")}
+      backHref={`/${locale}/sign-in`}
+      backLabel={t(locale, "common.back")}
+    >
+      <form onSubmit={handleSubmit} noValidate>
         {sent ? <div className="alert alertOk">{t(locale, "forgot.sent")}</div> : null}
         {errorCode ? (
           <div className="alert alertError">{t(locale, `errors.${errorCode}`)}</div>
         ) : null}
 
-        <label className="field">
+        <div className="field" style={{ marginBottom: 14 }}>
           <span className="fieldLabel">{t(locale, "signIn.emailLabel")}</span>
           <input
             className="fieldInput"
@@ -65,16 +61,12 @@ export default function ForgotPasswordPage() {
             onChange={(event) => setEmail(event.target.value)}
             required
           />
-        </label>
+        </div>
 
-        <button className="button" type="submit" disabled={submitting}>
+        <button className="button" type="submit" disabled={submitting} style={{ width: "100%" }}>
           {submitting ? t(locale, "forgot.submitting") : t(locale, "forgot.submit")}
         </button>
-
-        <a className="linkButton" href={`/${locale}/sign-in`}>
-          {t(locale, "common.back")}
-        </a>
       </form>
-    </div>
+    </AuthLayout>
   );
 }

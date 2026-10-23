@@ -33,11 +33,21 @@
     "employeeAccount": "员工账号",
     "toggleSidebar": "切换侧边栏"
   },
+  "auth": {
+    "legalPrefix": "继续即表示你同意",
+    "terms": "服务条款",
+    "privacy": "隐私政策",
+    "backToPortal": "返回 Learning Guide Portal"
+  },
   "signIn": {
     "title": "登录",
     "subtitle": "仅支持员工邮箱与密码登录，不提供自助注册。",
     "emailLabel": "邮箱",
     "emailPlaceholder": "name@example.com",
+    "emailStepSubtitle": "请输入员工邮箱以继续。",
+    "continue": "继续",
+    "changeEmail": "使用其他邮箱",
+    "portalBack": "返回 Learning Guide Portal",
     "passwordLabel": "密码",
     "passwordPlaceholder": "请输入密码",
     "forgotPassword": "忘记密码？",

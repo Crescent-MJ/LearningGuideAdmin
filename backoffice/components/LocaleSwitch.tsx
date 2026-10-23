@@ -6,14 +6,12 @@ import { useState } from "react";
 import { localeHref, otherLocale } from "@/lib/i18n/config";
 import { useLocale } from "@/lib/i18n/useLocale";
 
-/**
- * 语言切换（PORT-NAV-006）。
- * persist=true 时先落库当前员工的偏好，再跳转；
- * 未登录页面传 false，交给 middleware 依据 URL 写 Cookie。
- */
+/** 与 Portal 一致：胶囊显示当前语言的短名（EN / 中），点击切到另一种语言。 */
+const SHORT_LABEL = { "en-GB": "EN", "zh-CN": "中" } as const;
+
 export function LocaleSwitch({
   persist,
-  className = "localeBadge",
+  className = "localeChip",
 }: {
   persist: boolean;
   className?: string;
@@ -47,10 +45,10 @@ export function LocaleSwitch({
       className={className}
       onClick={() => void change()}
       disabled={busy}
-      style={{ cursor: "pointer" }}
-      aria-label={`Switch to ${target}`}
+      aria-label={`Switch language to ${target}`}
+      title={`Switch language to ${target}`}
     >
-      {locale} → {target}
+      {SHORT_LABEL[locale]}
     </button>
   );
 }
