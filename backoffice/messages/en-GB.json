@@ -31,7 +31,15 @@
     "helpDesk": "HelpDesk",
     "settings": "Settings",
     "employeeAccount": "Employee Account",
+    "paymentGateway": "Payment Gateway",
+    "notificationConfiguration": "Notification Configuration",
     "toggleSidebar": "Toggle sidebar"
+  },
+  "settings": {
+    "paymentGatewayTitle": "Payment Gateway",
+    "paymentGatewayBody": "This configuration is an entry point only in P0; its parameters are defined by a separate PRD.",
+    "notificationConfigurationTitle": "Notification Configuration",
+    "notificationConfigurationBody": "This configuration is an entry point only in P0; email templates are currently fixed on the server."
   },
   "auth": {
     "legalPrefix": "By continuing you agree to the",

@@ -31,7 +31,15 @@
     "helpDesk": "服务台",
     "settings": "设置",
     "employeeAccount": "员工账号",
+    "paymentGateway": "支付网关",
+    "notificationConfiguration": "通知配置",
     "toggleSidebar": "切换侧边栏"
+  },
+  "settings": {
+    "paymentGatewayTitle": "支付网关",
+    "paymentGatewayBody": "该配置在 P0 只保留入口，具体参数由单独的 PRD 定义。",
+    "notificationConfigurationTitle": "通知配置",
+    "notificationConfigurationBody": "该配置在 P0 只保留入口，当前邮件模板由服务端固定提供。"
   },
   "auth": {
     "legalPrefix": "继续即表示你同意",

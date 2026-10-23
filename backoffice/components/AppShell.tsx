@@ -10,12 +10,13 @@ import type { Locale } from "@/lib/i18n/config";
 import { t } from "@/lib/i18n/messages";
 import { useLocale } from "@/lib/i18n/useLocale";
 import {
-  canAccessEmployeeAccount,
-  employeeAccountHref,
   menuFromPathSegments,
   menuHref,
+  settingsSubHref,
   visibleMenus,
+  visibleSettingsSubs,
   type MenuKey,
+  type SettingsSubKey,
 } from "@/modules/rbac/permissions";
 
 const MENU_ICON: Record<MenuKey, string> = {
@@ -40,6 +41,12 @@ const MENU_LABEL: Record<MenuKey, string> = {
   settings: "nav.settings",
 };
 
+const SETTINGS_SUB_LABEL: Record<SettingsSubKey, string> = {
+  employeeAccount: "nav.employeeAccount",
+  paymentGateway: "nav.paymentGateway",
+  notificationConfiguration: "nav.notificationConfiguration",
+};
+
 export type ShellEmployee = {
   displayName: string;
   loginEmail: string;
@@ -60,8 +67,10 @@ export function AppShell({
   const [collapsed, setCollapsed] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [passwordOpen, setPasswordOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const menus = visibleMenus(employee.role);
+  const settingsExpanded = !collapsed && (settingsOpen || activeMenu === "settings");
 
   async function signOut() {
     await fetch("/api/auth/sign-out", { method: "POST" });
@@ -85,19 +94,72 @@ export function AppShell({
           </button>
         </div>
 
-        {menus.map((menu) => (
-          <a
-            key={menu}
-            className={menu === activeMenu ? "navItem navItemActive" : "navItem"}
-            href={menuHref(locale, menu)}
-            title={t(locale, MENU_LABEL[menu])}
-          >
-            <span className="navIcon" aria-hidden="true">
-              {MENU_ICON[menu]}
-            </span>
-            {collapsed ? null : <span>{t(locale, MENU_LABEL[menu])}</span>}
-          </a>
-        ))}
+        {menus.map((menu) => {
+          if (menu === "settings") {
+            return (
+              <div key={menu} className="navGroup">
+                <button
+                  type="button"
+                  className={activeMenu === "settings" ? "navItem navItemActive" : "navItem"}
+                  title={t(locale, MENU_LABEL.settings)}
+                  aria-expanded={settingsExpanded}
+                  onClick={() => {
+                    if (collapsed) {
+                      router.push(menuHref(locale, "settings"));
+                      return;
+                    }
+                    setSettingsOpen((value) => !value);
+                  }}
+                >
+                  <span className="navIcon" aria-hidden="true">
+                    {MENU_ICON.settings}
+                  </span>
+                  {collapsed ? null : (
+                    <>
+                      <span>{t(locale, MENU_LABEL.settings)}</span>
+                      <span className="navChevron" aria-hidden="true">
+                        {settingsExpanded ? "▾" : "▸"}
+                      </span>
+                    </>
+                  )}
+                </button>
+
+                {settingsExpanded ? (
+                  <div className="navSubGroup">
+                    {visibleSettingsSubs(employee.role).map((sub) => {
+                      const href = settingsSubHref(locale, sub);
+                      return (
+                        <a
+                          key={sub}
+                          className={
+                            pathname === href ? "navSubItem navSubItemActive" : "navSubItem"
+                          }
+                          href={href}
+                        >
+                          {t(locale, SETTINGS_SUB_LABEL[sub])}
+                        </a>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            );
+          }
+
+          return (
+            <a
+              key={menu}
+              className={menu === activeMenu ? "navItem navItemActive" : "navItem"}
+              href={menuHref(locale, menu)}
+              title={t(locale, MENU_LABEL[menu])}
+            >
+              <span className="navIcon" aria-hidden="true">
+                {MENU_ICON[menu]}
+              </span>
+              {collapsed ? null : <span>{t(locale, MENU_LABEL[menu])}</span>}
+            </a>
+          );
+        })}
       </nav>
 
       <div className="main">
@@ -157,15 +219,7 @@ export function AppShell({
                   >
                     {t(locale, "shell.changePassword")}
                   </button>
-                  {canAccessEmployeeAccount(employee.role) ? (
-                    <a
-                      className="navItem"
-                      style={{ color: "var(--text)" }}
-                      href={employeeAccountHref(locale)}
-                    >
-                      {t(locale, "nav.employeeAccount")}
-                    </a>
-                  ) : null}
+                  {/* PORT-NAV-005：员工下拉只含 Change Password 与 Sign Out */}
                   <button
                     type="button"
                     className="navItem"

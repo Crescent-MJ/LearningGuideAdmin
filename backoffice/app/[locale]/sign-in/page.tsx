@@ -27,6 +27,14 @@ export default function SignInPage() {
   const [errorCode, setErrorCode] = useState<ErrorCode | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const emailRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
+
+  // 不用 autoFocus：SSR 会输出 autofocus 属性，客户端补水时属性不一致会触发 React 警告
+  useEffect(() => {
+    if (step === "email") emailRef.current?.focus();
+    else passwordRef.current?.focus();
+  }, [step]);
 
   const runEmailCheck = useCallback(async (value: string) => {
     setEmailState("checking");
@@ -147,7 +155,7 @@ export default function SignInPage() {
                 type="email"
                 name="email"
                 autoComplete="username"
-                autoFocus
+                ref={emailRef}
                 placeholder={t(locale, "signIn.emailPlaceholder")}
                 value={email}
                 onChange={(event) => {
@@ -157,7 +165,7 @@ export default function SignInPage() {
                 required
               />
               <button className="button" type="submit" disabled={submitting}>
-                {submitting ? t(locale, "common.loading") : t(locale, "signIn.continue")}
+                {submitting ? t(locale, "signIn.checking") : t(locale, "signIn.continue")}
               </button>
             </div>
           </div>
@@ -203,7 +211,7 @@ export default function SignInPage() {
               type={showPassword ? "text" : "password"}
               name="password"
               autoComplete="current-password"
-              autoFocus
+              ref={passwordRef}
               placeholder={t(locale, "signIn.passwordPlaceholder")}
               value={password}
               onChange={(event) => setPassword(event.target.value)}

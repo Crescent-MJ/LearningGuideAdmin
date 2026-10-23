@@ -6,7 +6,10 @@ import {
   canViewMenu,
   isActionAllowed,
   MENU_ORDER,
+  settingsSubHref,
+  SETTINGS_SUB_ORDER,
   visibleMenus,
+  visibleSettingsSubs,
 } from "@/modules/rbac/permissions";
 
 describe("navigation visibility", () => {
@@ -57,5 +60,36 @@ describe("employee account management", () => {
     assert.equal(canAccessEmployeeAccount("OPERATION_ADMIN"), false);
     assert.equal(canAccessEmployeeAccount("COURSE_CREATOR"), false);
     assert.equal(canAccessEmployeeAccount("OPERATION_AI"), false);
+  });
+});
+
+describe("settings sub-navigation", () => {
+  it("shows three sub-items to Admin in the approved order", () => {
+    assert.deepEqual(visibleSettingsSubs("ADMIN"), [...SETTINGS_SUB_ORDER]);
+  });
+
+  it("hides Employee Account from every non-Admin role", () => {
+    for (const role of [
+      "COURSE_CREATOR",
+      "GRAPHIC_DESIGNER",
+      "FINANCE",
+      "OPERATION_ADMIN",
+      "OPERATION_AI",
+    ] as const) {
+      const subs = visibleSettingsSubs(role);
+      assert.equal(subs.includes("employeeAccount"), false, role);
+      assert.deepEqual(subs, ["paymentGateway", "notificationConfiguration"], role);
+    }
+  });
+
+  it("builds locale-aware sub-menu hrefs", () => {
+    assert.equal(
+      settingsSubHref("zh-CN", "employeeAccount"),
+      "/zh-CN/settings/employee-account"
+    );
+    assert.equal(
+      settingsSubHref("en-GB", "notificationConfiguration"),
+      "/en-GB/settings/notification-configuration"
+    );
   });
 });

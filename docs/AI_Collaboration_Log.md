@@ -774,3 +774,27 @@
   HTTP 实测 `/en-GB/sign-in` 与 `/zh-CN/sign-in` 均 200，语言胶囊分别渲染 `EN` / `中`，
   背景图 `/portal/auth-library.jpg` 200（1,083,702 bytes）
 
+
+---
+
+## 2026-10-23 ~ 按 PRD 修正导航结构 + 修复登录页显示问题
+
+- **用户反馈**：①「继续」「显示密码」按钮文字被换行；②登录后的功能菜单与 PRD 不一致
+- **定位**：登录页报错为 React 补水告警（`A tree hydrated but some attributes…`），
+  由输入框 `autoFocus` 导致 SSR 输出 `autofocus` 属性、客户端属性不一致
+- **导航修正（对照 PRD 原文）**：
+  - PORT-NAV-002：八个一级菜单顺序 Course/Knowledge/AI Tutor/Order/Reporting/Student/HelpDesk/Settings —— 原本已合规
+  - §8.5 + §2 范围说明：Settings 应有**子导航**（Employee Account / Payment Gateway /
+    Notification Configuration），原实现把「员工账号」放进员工下拉，缺子导航
+  - PORT-NAV-005：员工下拉只含 Change Password 与 Sign Out —— 已移除多余项
+  - §3.3 / PORT-LST-001：Employee Account 仅 Admin 可见，非 Admin 连子菜单都不显示
+- **改动**
+  - `modules/rbac/permissions.ts`：新增 `SETTINGS_SUB_ORDER` / `settingsSubHref` / `visibleSettingsSubs`
+  - `components/AppShell.tsx`：Settings 变为可展开分组，子项高亮；下拉只留两项
+  - 新增 `settings/page.tsx`（落到首个可见子项）、`settings/payment-gateway`、`settings/notification-configuration`
+  - `globals.css`：`.button` 加 `white-space: nowrap`、`.inputRow` 内输入框自适应、新增子导航样式
+  - `sign-in/page.tsx`：`autoFocus` → `ref + useEffect`
+- **验证**：`tsc` 0 error、`eslint` 0 warning、单元测试 47/47、`next build` 成功；
+  HTTP 实测 `/zh-CN/settings` → 307 → `/settings/employee-account`，三个子页面均 200；
+  SSR 侧栏顺序断言为「课程→知识库→AI 导师→订单→报表→学生→服务台→设置→员工账号→支付网关→通知配置」
+

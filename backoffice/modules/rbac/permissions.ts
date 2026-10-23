@@ -149,6 +149,35 @@ export function employeeAccountHref(locale: string): string {
   return `/${locale}/${MENU_SEGMENT.settings}/employee-account`;
 }
 
+/**
+ * PRD §2 范围说明 + §8.5：Settings 有子导航，其中 Employee Account 仅 Admin 可见；
+ * Payment Gateway 与 Notification Configuration 在 P0 只是占位入口。
+ */
+export type SettingsSubKey = "employeeAccount" | "paymentGateway" | "notificationConfiguration";
+
+export const SETTINGS_SUB_ORDER = [
+  "employeeAccount",
+  "paymentGateway",
+  "notificationConfiguration",
+] as const;
+
+export const SETTINGS_SUB_SEGMENT: Record<SettingsSubKey, string> = {
+  employeeAccount: "employee-account",
+  paymentGateway: "payment-gateway",
+  notificationConfiguration: "notification-configuration",
+};
+
+export function settingsSubHref(locale: string, sub: SettingsSubKey): string {
+  return `/${locale}/${MENU_SEGMENT.settings}/${SETTINGS_SUB_SEGMENT[sub]}`;
+}
+
+/** 非 Admin 看不到 Employee Account 子项（PORT-§3.3 / §15.3）。 */
+export function visibleSettingsSubs(role: EmployeeRole): SettingsSubKey[] {
+  return SETTINGS_SUB_ORDER.filter(
+    (sub) => sub !== "employeeAccount" || canAccessEmployeeAccount(role)
+  );
+}
+
 export function menuFromPathSegments(segments: string[] | undefined): MenuKey | null {
   if (!segments || segments.length === 0) return null;
   const target = segments[0];
